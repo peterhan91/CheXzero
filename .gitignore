@@ -5,3 +5,7 @@ __pycache__
 notebooks/clip_v1_0.1_state_dict.pt
 notebooks/models
 notebooks/train/wandb
+*.pth
+*.npy
+*.json
+*.ipynb
