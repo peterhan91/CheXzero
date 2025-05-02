@@ -4,6 +4,7 @@ import glob
 import numpy as np
 import pandas as pd
 import csv
+import gc
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
@@ -32,7 +33,7 @@ def preprocess(img, desired_size=320):
     old_size = img.size
     ratio = float(desired_size)/max(old_size)
     new_size = tuple([int(x*ratio) for x in old_size])
-    img = img.resize(new_size, Image.ANTIALIAS)
+    img = img.resize(new_size, Image.Resampling.LANCZOS)
     # create a new image and paste the resized on it
 
     new_img = Image.new('L', (desired_size, desired_size))
@@ -48,19 +49,34 @@ def img_to_hdf5(cxr_paths: List[Union[str, Path]], out_filepath: str, resolution
     dset_size = len(cxr_paths)
     failed_images = []
     with h5py.File(out_filepath,'w') as h5f:
-        img_dset = h5f.create_dataset('cxr', shape=(dset_size, resolution, resolution))    
+        if resolution < 512:
+            img_dset = h5f.create_dataset('cxr', shape=(dset_size, resolution, resolution)) 
+        else:
+            img_dset = h5f.create_dataset('cxr', shape=(dset_size, resolution, resolution),
+                                            # compression='lzf',  # or 'lzf' for faster but less compression
+                                        )
         for idx, path in enumerate(tqdm(cxr_paths)):
-            try: 
-                # read image using cv2
-                img = cv2.imread(str(path))
-                # convert to PIL Image object
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                img_pil = Image.fromarray(img)
-                # preprocess
-                img = preprocess(img_pil, desired_size=resolution)     
-                img_dset[idx] = img
-            except Exception as e: 
-                failed_images.append((path, e))
+            # try: 
+            with Image.open(path) as img:
+                img = img.convert('L')  # Convert to grayscale
+
+                # Resize while keeping aspect ratio
+                old_size = img.size
+                ratio = float(resolution) / max(old_size)
+                new_size = tuple([int(x * ratio) for x in old_size])
+                img_resized = img.resize(new_size, Image.Resampling.LANCZOS)
+
+                # Create new image and paste the resized one centered
+                new_img = Image.new('L', (resolution, resolution))
+                new_img.paste(img_resized, ((resolution - new_size[0]) // 2,
+                                            (resolution - new_size[1]) // 2))
+
+                # Save into dataset
+                img_dset[idx] = new_img
+            
+            # except Exception as e: 
+            #     failed_images.append((path, e))  
+                
     print(f"{len(failed_images)} / {len(cxr_paths)} images failed to be added to h5.", failed_images)
 
 def get_files(directory):
@@ -105,39 +121,43 @@ def write_report_csv(cxr_paths, txt_folder, out_path):
         patient_group = tokens[-4]
         txt_report = txt_folder + patient_group + '/' + patient_num + '/' + study_num + '.txt'
         filename = study_num + '.txt'
-        f = open(txt_report, 'r')
-        s = f.read()
-        s_split = s.split()
-        if "IMPRESSION:" in s_split:
-            begin = getIndexOfLast(s_split, "IMPRESSION:") + 1
-            end = None
-            end_cand1 = None
-            end_cand2 = None
-            # remove recommendation(s) and notification
-            if "RECOMMENDATION(S):" in s_split:
-                end_cand1 = s_split.index("RECOMMENDATION(S):")
-            elif "RECOMMENDATION:" in s_split:
-                end_cand1 = s_split.index("RECOMMENDATION:")
-            elif "RECOMMENDATIONS:" in s_split:
-                end_cand1 = s_split.index("RECOMMENDATIONS:")
+        try: 
+            f = open(txt_report, 'r')
+            s = f.read()
+            s_split = s.split()
+            if "IMPRESSION:" in s_split:
+                begin = getIndexOfLast(s_split, "IMPRESSION:") + 1
+                end = None
+                end_cand1 = None
+                end_cand2 = None
+                # remove recommendation(s) and notification
+                if "RECOMMENDATION(S):" in s_split:
+                    end_cand1 = s_split.index("RECOMMENDATION(S):")
+                elif "RECOMMENDATION:" in s_split:
+                    end_cand1 = s_split.index("RECOMMENDATION:")
+                elif "RECOMMENDATIONS:" in s_split:
+                    end_cand1 = s_split.index("RECOMMENDATIONS:")
 
-            if "NOTIFICATION:" in s_split:
-                end_cand2 = s_split.index("NOTIFICATION:")
-            elif "NOTIFICATIONS:" in s_split:
-                end_cand2 = s_split.index("NOTIFICATIONS:")
+                if "NOTIFICATION:" in s_split:
+                    end_cand2 = s_split.index("NOTIFICATION:")
+                elif "NOTIFICATIONS:" in s_split:
+                    end_cand2 = s_split.index("NOTIFICATIONS:")
 
-            if end_cand1 and end_cand2:
-                end = min(end_cand1, end_cand2)
-            elif end_cand1:
-                end = end_cand1
-            elif end_cand2:
-                end = end_cand2            
+                if end_cand1 and end_cand2:
+                    end = min(end_cand1, end_cand2)
+                elif end_cand1:
+                    end = end_cand1
+                elif end_cand2:
+                    end = end_cand2            
 
-            if end == None:
-                imp = " ".join(s_split[begin:])
+                if end == None:
+                    imp = " ".join(s_split[begin:])
+                else:
+                    imp = " ".join(s_split[begin:end])
             else:
-                imp = " ".join(s_split[begin:end])
-        else:
+                imp = 'NO IMPRESSION'
+        except:
+            print(f"Error reading file: {txt_report}")
             imp = 'NO IMPRESSION'
             
         imps["impression"].append(imp)

@@ -9,3 +9,4 @@ notebooks/train/wandb
 *.npy
 *.json
 *.ipynb
+data/

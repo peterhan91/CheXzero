@@ -21,10 +21,10 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--cxr_filepath', type=str, default='data/cxr.h5', help="Directory to load chest x-ray image data from.")
     parser.add_argument('--txt_filepath', type=str, default='data/mimic_impressions.csv', help="Directory to load radiology report impressions text from.")
-    parser.add_argument('--batch_size', type=int, default=16)
-    parser.add_argument('--epochs', type=int, default=4)
-    parser.add_argument('--lr', type=float, default=1e-4)
-    parser.add_argument('--save_interval', type=int, default=100)
+    parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--epochs', type=int, default=40)
+    parser.add_argument('--lr', type=float, default=4e-4)
+    parser.add_argument('--save_interval', type=int, default=1000)
     parser.add_argument('--log_interval', type=int, default=10)
     parser.add_argument('--save_dir', type=str, default="checkpoints/", help="Directory to save the trained model.")
     parser.add_argument('--seed', type=int, default=1234)
@@ -35,10 +35,9 @@ def parse_args():
     parser.add_argument('--model_name', type=str, default="pt-imp")
     # --- Validation Arguments ---
     parser.add_argument('--do_validate', action='store_true', help="Perform zero-shot validation during training.")
-    parser.add_argument('--valid_interval', type=int, default=100)
-    parser.add_argument('--val_cxr_filepath', type=str, default='data/val_cxr.h5', help="Path to validation CXR images (e.g., CheXpert val set).")
-    parser.add_argument('--val_label_path', type=str, default='data/val_labels.csv', help="Path to validation ground truth labels (e.g., CheXpert val labels).")
-    parser.add_argument('--val_interval_epochs', type=int, default=1, help="Perform validation every N epochs.")
+    parser.add_argument('--valid_interval', type=int, default=1000)
+    parser.add_argument('--val_cxr_filepath', type=str, default='data/chexpert_valid.h5', help="Path to validation CXR images (e.g., CheXpert val set).")
+    parser.add_argument('--val_label_path', type=str, default='data/chexpert_valid.csv', help="Path to validation ground truth labels (e.g., CheXpert val labels).")
     parser.add_argument('--val_batch_size', type=int, default=32, help="Batch size for validation.") # Can be larger than training bs
     args = parser.parse_args()
     return args

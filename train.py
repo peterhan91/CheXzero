@@ -108,7 +108,7 @@ def load_data(cxr_filepath, txt_filepath, batch_size=4, column='report', pretrai
             if i == 3:
                 break
     
-    loader_params = {'batch_size':batch_size, 'shuffle': True, 'num_workers': 0}
+    loader_params = {'batch_size':batch_size, 'shuffle': True, 'num_workers': 8}
     data_loader = data.DataLoader(torch_dset, **loader_params)
     return data_loader, device
     
