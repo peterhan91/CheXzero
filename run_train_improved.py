@@ -22,22 +22,22 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--cxr_filepath', type=str, default='data/cxr.h5')
     parser.add_argument('--txt_filepath', type=str, default='data/mimic_impressions.csv')
-    parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--batch_size', type=int, default=224)
     parser.add_argument('--epochs', type=int, default=40)
     parser.add_argument('--lr', type=float, default=1e-4)
-    parser.add_argument('--weight_decay', type=float, default=0.1)
+    parser.add_argument('--weight_decay', type=float, default=0.2)
     parser.add_argument('--warmup_steps', type=int, default=250)
     parser.add_argument('--lr_schedule', type=str, default='cosine')
     parser.add_argument('--grad_accum_steps', type=int, default=4)
-    parser.add_argument('--save_interval', type=int, default=1000)
+    parser.add_argument('--save_interval', type=int, default=100)
     parser.add_argument('--log_interval', type=int, default=10)
     parser.add_argument('--save_dir', type=str, default="checkpoints/")
     parser.add_argument('--seed', type=int, default=1234)
     parser.add_argument('--context_length', type=int, default=77)
     parser.add_argument('--random_init', type=bool, default=True)
-    parser.add_argument('--model_name', type=str, default="pt-imp-v2.0")
+    parser.add_argument('--model_name', type=str, default="pt-imp-v3.0")
     parser.add_argument('--do_validate', type=bool, default=True)
-    parser.add_argument('--valid_interval', type=int, default=1000)
+    parser.add_argument('--valid_interval', type=int, default=100)
     parser.add_argument('--val_cxr_filepath', type=str, default='data/chexpert_valid.h5')
     parser.add_argument('--val_label_path', type=str, default='data/chexpert_valid.csv')
     parser.add_argument('--val_batch_size', type=int, default=32)
@@ -47,7 +47,7 @@ def parse_args():
 def model_pipeline(config, verbose=0):
     torch.manual_seed(config.seed)
     torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.benchmark = True
 
     model, data_loader, device, criterion, optimizer, scheduler, scaler = make(config)
     train(model, data_loader, device, criterion, optimizer, scheduler, scaler, config)

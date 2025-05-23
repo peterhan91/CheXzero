@@ -289,15 +289,16 @@ class CLIP(nn.Module):
                 width=vision_width
             )
         else:
-            vision_heads = vision_width // 64
-            self.visual = VisualTransformer(
-                input_resolution=image_resolution,
-                patch_size=vision_patch_size,
-                width=vision_width,
-                layers=vision_layers,
-                heads=vision_heads,
-                output_dim=embed_dim
-            )
+            # vision_heads = vision_width // 64
+            # self.visual = VisualTransformer(
+            #     input_resolution=image_resolution,
+            #     patch_size=vision_patch_size,
+            #     width=vision_width,
+            #     layers=vision_layers,
+            #     heads=vision_heads,
+            #     output_dim=embed_dim
+            # )
+            self.visual = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitb14_reg')
 
         self.transformer = Transformer(
             width=transformer_width,
@@ -355,7 +356,10 @@ class CLIP(nn.Module):
 
     @property
     def dtype(self):
-        return self.visual.conv1.weight.dtype
+        try:
+            return self.visual.conv1.weight.dtype
+        except:
+            return self.visual.patch_embed.proj.weight.dtype
 
     def encode_image(self, image):
         return self.visual(image.type(self.dtype))

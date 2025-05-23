@@ -90,9 +90,10 @@ def load_data(cxr_filepath, txt_filepath, batch_size=4, column='report', pretrai
         print('Interpolation Mode: ', InterpolationMode.BICUBIC)
         print("Finished image transforms for pretrained model.")
     else: 
-        input_resolution = 320
+        input_resolution = 308
         transform = Compose([
             Normalize((101.48761, 101.48761, 101.48761), (83.43944, 83.43944, 83.43944)),
+            Resize(input_resolution, interpolation=InterpolationMode.BICUBIC),
         ])
         print("Finished image transforms for clip model.")
     
@@ -252,7 +253,7 @@ def setup_validation(config):
                        # with the labels inputted through `cxr_labels`. Otherwise, drop the first column and keep remaining.
     )
 
-    input_resolution = 224 if not config.random_init else 320 # Adjust based on your model init
+    input_resolution = 224 if not config.random_init else 308 # Adjust based on your model init
     print(f"Using validation input resolution: {input_resolution}")
 
     val_transform = Compose([
