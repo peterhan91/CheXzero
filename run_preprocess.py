@@ -24,6 +24,7 @@ if __name__ == "__main__":
 
         #Write CSV File Containing Impressions for each Chest X-ray
         write_report_csv(cxr_paths, args.radiology_reports_path, args.mimic_impressions_path)
+    
     elif args.dataset_type == "chexpert-test": 
         # Get all test paths based on cxr dir
         cxr_dir = Path(args.chest_x_ray_path)
@@ -33,7 +34,14 @@ if __name__ == "__main__":
         assert(len(cxr_paths) == 500)
        
         img_to_hdf5(cxr_paths, args.cxr_out_path)
-        
+    
+    elif args.dataset_type == "padchest-test":
+        df_padchest = pd.read_csv("csvs/padchest_test.csv")
+        df_padchest = df_padchest[df_padchest['is_test'] == True]
+        cxr_paths = df_padchest['Path'].tolist() # sort to align with groundtruth
+        assert(len(cxr_paths) == 500) or (len(cxr_paths) == 7943), f"Expected 500 or 7943 images, but got {len(cxr_paths)}"
+       
+        img_to_hdf5(cxr_paths, args.cxr_out_path, resolution=256)           
         
         
     
