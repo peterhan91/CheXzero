@@ -80,7 +80,7 @@ def load_data(cxr_filepath, txt_filepath, batch_size=4, column='report', pretrai
         torch.cuda.set_device(device)
 
     if pretrained or use_dinov2: 
-        input_resolution = 224
+        input_resolution = 448
         transform = Compose([
             Normalize((101.48761, 101.48761, 101.48761), (83.43944, 83.43944, 83.43944)),
             Resize(input_resolution, interpolation=InterpolationMode.BICUBIC),
@@ -255,7 +255,7 @@ def setup_validation(config):
         )
 
         # Set input resolution based on model type
-        input_resolution = 224 if (not config.random_init or getattr(config, 'use_dinov2', False)) else 320
+        input_resolution = 448 if (not config.random_init or getattr(config, 'use_dinov2', False)) else 320
         print(f"Using validation input resolution: {input_resolution}")
 
         val_transform = Compose([

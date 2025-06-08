@@ -418,7 +418,7 @@ def make(
     # if using CLIP pretrained model
     if pretrained: 
         # resize to input resolution of pretrained clip model
-        input_resolution = 224
+        input_resolution = 448
         transformations.append(Resize(input_resolution, interpolation=InterpolationMode.BICUBIC))
     transform = Compose(transformations)
     
