@@ -11,6 +11,7 @@ def parse_args():
     parser.add_argument('--mimic_impressions_path', default='data/mimic_impressions.csv', help="Directory to save extracted impressions from radiology reports.")
     parser.add_argument('--chest_x_ray_path', default='/deep/group/data/mimic-cxr/mimic-cxr-jpg/2.0.0/files', help="Directory where chest x-ray image data is stored. This should point to the files folder from the MIMIC chest x-ray dataset.")
     parser.add_argument('--radiology_reports_path', default='/deep/group/data/med-data/files/', help="Directory radiology reports are stored. This should point to the files folder from the MIMIC radiology reports dataset.")
+    parser.add_argument('--resolution', type=int, default=448, help="Resolution of chest x-ray images.")
     args = parser.parse_args()
     return args
 
@@ -20,7 +21,7 @@ if __name__ == "__main__":
         # Write Chest X-ray Image HDF5 File
         get_cxr_path_csv(args.csv_out_path, args.chest_x_ray_path)
         cxr_paths = get_cxr_paths_list(args.csv_out_path)
-        img_to_hdf5(cxr_paths, args.cxr_out_path)
+        img_to_hdf5(cxr_paths, args.cxr_out_path, resolution=args.resolution)
 
         #Write CSV File Containing Impressions for each Chest X-ray
         write_report_csv(cxr_paths, args.radiology_reports_path, args.mimic_impressions_path)
@@ -33,7 +34,7 @@ if __name__ == "__main__":
         cxr_paths = sorted(cxr_paths) # sort to align with groundtruth
         assert(len(cxr_paths) == 500)
        
-        img_to_hdf5(cxr_paths, args.cxr_out_path)
+        img_to_hdf5(cxr_paths, args.cxr_out_path, resolution=args.resolution)
     
     elif args.dataset_type == "padchest-test":
         df_padchest = pd.read_csv("csvs/padchest_test.csv")
@@ -41,7 +42,7 @@ if __name__ == "__main__":
         cxr_paths = df_padchest['Path'].tolist() # sort to align with groundtruth
         assert(len(cxr_paths) == 500) or (len(cxr_paths) == 7943), f"Expected 500 or 7943 images, but got {len(cxr_paths)}"
        
-        img_to_hdf5(cxr_paths, args.cxr_out_path, resolution=256)           
+        img_to_hdf5(cxr_paths, args.cxr_out_path, resolution=args.resolution)           
         
         
     
