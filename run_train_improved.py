@@ -119,6 +119,11 @@ def train(model, loader, device, criterion, optimizer, scheduler, scaler, config
     optimizer.zero_grad()
 
     for epoch in range(config.epochs):
+        # Stop after exactly 10 epochs regardless of config.epochs
+        if epoch >= 10:
+            print(f"Training stopped after 10 epochs (was configured for {config.epochs} epochs)")
+            break
+            
         for data in tqdm(loader):
             images = data['img'].to(device)
             texts = preprocess_text(data['txt'], model).to(device)
