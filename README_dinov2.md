@@ -4,10 +4,7 @@ This is a minimal integration of DinoV2 vision encoders into the CLIP training p
 
 ## Requirements
 
-Install the additional dependency:
-```bash
-pip install timm>=0.9.0
-```
+DinoV2 models are loaded directly from the official Facebook Research implementation via torch.hub - no additional dependencies required!
 
 ## Usage
 

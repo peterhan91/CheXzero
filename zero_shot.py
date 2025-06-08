@@ -88,25 +88,14 @@ def load_clip(model_path, pretrained=False, context_length=77,
         
         # Replace visual encoder with DinoV2 if requested
         if use_dinov2:
-            import timm
+            # Load DinoV2 backbone from official Facebook Research implementation
+            dinov2_backbone = torch.hub.load('facebookresearch/dinov2', dinov2_model_name, pretrained=True)
             
-            # Load DinoV2 backbone
-            dinov2_backbone = timm.create_model(dinov2_model_name, pretrained=True)
-            
-            # Remove classification head
-            if hasattr(dinov2_backbone, 'head'):
-                dinov2_backbone.head = nn.Identity()
-            if hasattr(dinov2_backbone, 'fc'):
-                dinov2_backbone.fc = nn.Identity()
-            
-            # Get feature dimension
+            # Get feature dimension using a dummy forward pass
             with torch.no_grad():
                 dummy_input = torch.randn(1, 3, 224, 224)
-                features = dinov2_backbone.forward_features(dummy_input)
-                if len(features.shape) == 3:  # [B, N, D]
-                    backbone_dim = features.shape[-1]
-                else:
-                    backbone_dim = features.shape[1]
+                features = dinov2_backbone(dummy_input)  # forward() returns CLS token directly
+                backbone_dim = features.shape[-1]
             
             # Create simple wrapper class
             class DinoV2Visual(nn.Module):
@@ -116,11 +105,8 @@ def load_clip(model_path, pretrained=False, context_length=77,
                     self.projection = nn.Linear(backbone_dim, output_dim)
                     
                 def forward(self, x):
-                    features = self.backbone.forward_features(x)
-                    if len(features.shape) == 3:  # Use CLS token
-                        features = features[:, 0, :]
-                    elif len(features.shape) == 4:  # Global average pooling
-                        features = features.mean(dim=[2, 3])
+                    # DinoV2 forward() returns CLS token directly
+                    features = self.backbone(x)
                     return self.projection(features)
                 
                 @property
