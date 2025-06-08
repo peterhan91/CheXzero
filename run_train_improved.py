@@ -56,6 +56,12 @@ def parse_args():
                         choices=['dinov2_vits14', 'dinov2_vitb14', 'dinov2_vitl14', 'dinov2_vitg14'],
                         help='DinoV2 model variant to use')
     parser.add_argument('--freeze_dinov2', action='store_true', help='Freeze DinoV2 backbone weights')
+    # Early stopping arguments
+    parser.add_argument('--early_stopping', action='store_true', help='Enable early stopping')
+    parser.add_argument('--patience', type=int, default=5, help='Number of epochs to wait without improvement before stopping')
+    parser.add_argument('--min_delta', type=float, default=0.001, help='Minimum change to qualify as an improvement')
+    parser.add_argument('--early_stopping_metric', type=str, default='mean_auc', 
+                        choices=['mean_auc', 'loss'], help='Metric to use for early stopping')
     args = parser.parse_args()
     return args
 
@@ -129,13 +135,17 @@ def train(model, loader, device, criterion, optimizer, scheduler, scaler, config
     batch_ct = 0
     running_loss = 0.0
 
+    # Early stopping variables (only initialize if early stopping is enabled)
+    if config.early_stopping:
+        best_metric = float('-inf') if config.early_stopping_metric == 'mean_auc' else float('inf')
+        epochs_without_improvement = 0
+        best_epoch = 0
+
     optimizer.zero_grad()
 
     for epoch in range(config.epochs):
-        # Stop after exactly 10 epochs regardless of config.epochs
-        if epoch >= 10:
-            print(f"Training stopped after 10 epochs (was configured for {config.epochs} epochs)")
-            break
+        epoch_loss = 0.0
+        batch_count_in_epoch = 0
             
         for data in tqdm(loader):
             images = data['img'].to(device)
@@ -159,6 +169,8 @@ def train(model, loader, device, criterion, optimizer, scheduler, scaler, config
             example_ct += images.size(0)
             batch_ct += 1
             running_loss += loss.item()
+            epoch_loss += loss.item()
+            batch_count_in_epoch += 1
 
             if batch_ct % config.log_interval == 0:
                 train_log(running_loss / config.log_interval, example_ct, epoch)
@@ -172,6 +184,55 @@ def train(model, loader, device, criterion, optimizer, scheduler, scaler, config
                 model_path = os.path.join(model_save_dir, f"checkpoint_{batch_ct}.pt")
                 save(model, model_path)
                 print("Saved checkpoint to:", model_path)
+        
+                # Early stopping check at the end of each epoch
+        if config.early_stopping and validation_enabled:
+            # Run validation at the end of epoch for early stopping
+            val_results_df = run_validation_step(model, val_loader, y_true_val, val_labels, val_templates, device, config)
+            
+            # Calculate metric for early stopping
+            if config.early_stopping_metric == 'mean_auc':
+                # Calculate mean AUC for key pathologies
+                key_pathologies = ['Atelectasis_auc', 'Cardiomegaly_auc', 'Consolidation_auc', 'Edema_auc', 'Pleural Effusion_auc']
+                available_cols = [col for col in key_pathologies if col in val_results_df.columns]
+                if available_cols:
+                    current_metric = val_results_df[available_cols].mean().mean()
+                else:
+                    # Fallback to all AUC columns
+                    auc_cols = [col for col in val_results_df.columns if col.endswith('_auc')]
+                    current_metric = val_results_df[auc_cols].mean().mean() if auc_cols else 0
+            else:  # loss metric
+                current_metric = epoch_loss / batch_count_in_epoch  # Use average epoch loss
+            
+            # Check for improvement
+            improved = False
+            if config.early_stopping_metric == 'mean_auc':
+                if current_metric > best_metric + config.min_delta:
+                    improved = True
+            else:  # loss metric (lower is better)
+                if current_metric < best_metric - config.min_delta:
+                    improved = True
+            
+            if improved:
+                best_metric = current_metric
+                best_epoch = epoch
+                epochs_without_improvement = 0
+                # Save best model
+                best_model_path = os.path.join(model_save_dir, "best_model.pt")
+                save(model, best_model_path)
+                print(f"New best {config.early_stopping_metric}: {current_metric:.4f} at epoch {epoch}")
+            else:
+                epochs_without_improvement += 1
+                print(f"No improvement for {epochs_without_improvement} epochs. Best {config.early_stopping_metric}: {best_metric:.4f} at epoch {best_epoch}")
+            
+            # Check if we should stop
+            if epochs_without_improvement >= config.patience:
+                print(f"Early stopping triggered! No improvement for {config.patience} epochs.")
+                print(f"Best {config.early_stopping_metric}: {best_metric:.4f} achieved at epoch {best_epoch}")
+                break
+        
+        # Reset running loss for next epoch
+        running_loss = 0.0
 
 def train_log(loss, example_ct, epoch):
     print(f"Loss after {str(example_ct).zfill(5)} examples (Epoch {epoch}): {loss:.3f}")
@@ -216,6 +277,14 @@ def save(model, path):
 def find_best_model(config):
     """Find the model with best validation ROC-AUC from validation results."""
     model_save_dir = os.path.join(config.save_dir, config.model_name)
+    
+    # First check if early stopping saved a best model
+    best_model_path = os.path.join(model_save_dir, "best_model.pt")
+    if os.path.exists(best_model_path):
+        print(f"Using best model from early stopping: {best_model_path}")
+        return best_model_path
+    
+    # Fall back to validation results-based selection
     val_results_pattern = os.path.join(model_save_dir, "val_results_*.csv")
     val_files = glob.glob(val_results_pattern)
     
