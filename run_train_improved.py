@@ -41,6 +41,12 @@ def parse_args():
     parser.add_argument('--val_cxr_filepath', type=str, default='data/chexpert_valid.h5')
     parser.add_argument('--val_label_path', type=str, default='data/chexpert_valid.csv')
     parser.add_argument('--val_batch_size', type=int, default=32)
+    # DinoV2 specific arguments
+    parser.add_argument('--use_dinov2', action='store_true', help='Use DinoV2 as vision encoder')
+    parser.add_argument('--dinov2_model_name', type=str, default='dinov2_vitb14', 
+                        choices=['dinov2_vits14', 'dinov2_vitb14', 'dinov2_vitl14', 'dinov2_vitg14'],
+                        help='DinoV2 model variant to use')
+    parser.add_argument('--freeze_dinov2', action='store_true', help='Freeze DinoV2 backbone weights')
     args = parser.parse_args()
     return args
 
@@ -61,8 +67,21 @@ def model_pipeline(config, verbose=0):
 
 def make(config):
     pretrained = not config.random_init
-    data_loader, device = load_data(config.cxr_filepath, config.txt_filepath, batch_size=config.batch_size, pretrained=pretrained, column="impression")
-    model = load_clip(model_path=None, pretrained=pretrained, context_length=config.context_length)
+    data_loader, device = load_data(
+        config.cxr_filepath, config.txt_filepath, 
+        batch_size=config.batch_size, 
+        pretrained=pretrained, 
+        use_dinov2=config.use_dinov2,
+        column="impression"
+    )
+    model = load_clip(
+        model_path=None, 
+        pretrained=pretrained, 
+        context_length=config.context_length,
+        use_dinov2=config.use_dinov2,
+        dinov2_model_name=config.dinov2_model_name,
+        freeze_dinov2=config.freeze_dinov2
+    )
     model.to(device)
     print('Model on Device.')
 
@@ -87,6 +106,8 @@ def make(config):
 def train(model, loader, device, criterion, optimizer, scheduler, scaler, config):
     model.train()
     val_loader, y_true_val, val_labels, val_templates, _ = setup_validation(config)
+    validation_enabled = val_loader is not None
+    
     model_save_dir = os.path.join(config.save_dir, config.model_name)
     os.makedirs(model_save_dir, exist_ok=True)
 
@@ -125,7 +146,7 @@ def train(model, loader, device, criterion, optimizer, scheduler, scaler, config
                 train_log(running_loss / config.log_interval, example_ct, epoch)
                 running_loss = 0.0
 
-            if config.do_validate and (batch_ct % config.valid_interval) == 0:
+            if config.do_validate and validation_enabled and (batch_ct % config.valid_interval) == 0:
                 val_results_df = run_validation_step(model, val_loader, y_true_val, val_labels, val_templates, device, config)
                 val_results_df.to_csv(os.path.join(model_save_dir, f"val_results_{batch_ct}.csv"), index=False)
 

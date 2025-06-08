@@ -64,7 +64,7 @@ class CXRDataset(data.Dataset):
         
         return sample
 
-def load_data(cxr_filepath, txt_filepath, batch_size=4, column='report', pretrained=False, verbose=False): 
+def load_data(cxr_filepath, txt_filepath, batch_size=4, column='report', pretrained=False, use_dinov2=False, verbose=False): 
     if torch.cuda.is_available():  
         dev = "cuda:0" 
         cuda_available = True
@@ -79,14 +79,17 @@ def load_data(cxr_filepath, txt_filepath, batch_size=4, column='report', pretrai
     if cuda_available: 
         torch.cuda.set_device(device)
 
-    if pretrained: 
+    if pretrained or use_dinov2: 
         input_resolution = 224
         transform = Compose([
             Normalize((101.48761, 101.48761, 101.48761), (83.43944, 83.43944, 83.43944)),
             Resize(input_resolution, interpolation=InterpolationMode.BICUBIC),
         ])
         print('Interpolation Mode: ', InterpolationMode.BICUBIC)
-        print("Finished image transforms for pretrained model.")
+        if use_dinov2:
+            print("Finished image transforms for DinoV2 model.")
+        else:
+            print("Finished image transforms for pretrained model.")
     else: 
         input_resolution = 320
         transform = Compose([
@@ -110,7 +113,8 @@ def load_data(cxr_filepath, txt_filepath, batch_size=4, column='report', pretrai
     data_loader = data.DataLoader(torch_dset, **loader_params)
     return data_loader, device
     
-def load_clip(model_path=None, pretrained=False, context_length=77):
+def load_clip(model_path=None, pretrained=False, context_length=77, 
+              use_dinov2=False, dinov2_model_name="dinov2_vitb14", freeze_dinov2=False):
     '''
     FUNCTION: load_clip
     -------------------------------
@@ -124,6 +128,9 @@ def load_clip(model_path=None, pretrained=False, context_length=77):
         CLIP model
         * context_length (optional) - length of the maximum number of 
         tokens that can be inputted into the CLIP model
+        * use_dinov2 (optional) - if True, will use DinoV2 as vision encoder
+        * dinov2_model_name (optional) - DinoV2 model variant to use
+        * freeze_dinov2 (optional) - if True, freeze DinoV2 backbone
     '''
 
     params = {
@@ -142,13 +149,66 @@ def load_clip(model_path=None, pretrained=False, context_length=77):
     # set device 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     
-    if pretrained: 
+    if pretrained and not use_dinov2: 
         # load clip pre-trained model
         model, preprocess = clip.load("ViT-B/32", device=device, jit=False)
         print("Loaded in pretrained model.")
     else: 
         model = CLIP(**params)
-        print("Loaded in clip model.")
+        
+        # Replace visual encoder with DinoV2 if requested
+        if use_dinov2:
+            import timm
+            
+            # Load DinoV2 backbone
+            dinov2_backbone = timm.create_model(dinov2_model_name, pretrained=True)
+            
+            # Remove classification head
+            if hasattr(dinov2_backbone, 'head'):
+                dinov2_backbone.head = nn.Identity()
+            if hasattr(dinov2_backbone, 'fc'):
+                dinov2_backbone.fc = nn.Identity()
+            
+            # Get feature dimension
+            with torch.no_grad():
+                dummy_input = torch.randn(1, 3, 224, 224)
+                features = dinov2_backbone.forward_features(dummy_input)
+                if len(features.shape) == 3:  # [B, N, D]
+                    backbone_dim = features.shape[-1]
+                else:
+                    backbone_dim = features.shape[1]
+            
+            # Create simple wrapper class
+            class DinoV2Visual(nn.Module):
+                def __init__(self, backbone, backbone_dim, output_dim):
+                    super().__init__()
+                    self.backbone = backbone
+                    self.projection = nn.Linear(backbone_dim, output_dim)
+                    
+                def forward(self, x):
+                    features = self.backbone.forward_features(x)
+                    if len(features.shape) == 3:  # Use CLS token
+                        features = features[:, 0, :]
+                    elif len(features.shape) == 4:  # Global average pooling
+                        features = features.mean(dim=[2, 3])
+                    return self.projection(features)
+                
+                @property
+                def conv1(self):
+                    # Dummy property for dtype compatibility
+                    return self.projection
+            
+            # Replace visual encoder
+            model.visual = DinoV2Visual(dinov2_backbone, backbone_dim, params['embed_dim'])
+            
+            # Freeze backbone if requested
+            if freeze_dinov2:
+                for param in model.visual.backbone.parameters():
+                    param.requires_grad = False
+            
+            print(f"Loaded CLIP model with DinoV2 vision encoder: {dinov2_model_name}")
+        else:
+            print("Loaded in clip model.")
     
     # if a model_path is provided, load in weights to backbone
     if model_path != None: 
@@ -172,6 +232,73 @@ def preprocess_text(texts, model):
             tokens[model.context_length - 1] = eot_token
         result[i, :len(tokens)] = torch.tensor(tokens)
     return result
+
+def setup_validation(config):
+    """
+    FUNCTION: setup_validation
+    ---------------------------------
+    This function sets up validation data for training monitoring.
+    
+    args:
+        * config - configuration object with validation parameters
+    
+    Returns validation loader, ground truth labels, label names, templates, and input resolution
+    """
+    # Check if validation files exist
+    if not os.path.exists(config.val_cxr_filepath) or not os.path.exists(config.val_label_path):
+        print("Warning: Validation files not found. Skipping validation setup.")
+        return None, None, None, None, None
+    
+    import zero_shot  # Import here to avoid circular imports
+    
+    val_labels = ['Atelectasis','Cardiomegaly', 'Consolidation', 'Edema',
+                  'Enlarged Cardiomediastinum', 'Fracture', 'Lung Lesion',
+                  'Lung Opacity', 'No Finding','Pleural Effusion',
+                  'Pleural Other', 'Pneumonia', 'Pneumothorax', 'Support Devices']
+
+    # Define standard +/- templates for softmax evaluation
+    val_templates = [("{}", "no {}")]  # Using a tuple pair for softmax eval
+
+    try:
+        # Load ground truth validation labels
+        print(f"Loading validation labels from: {config.val_label_path}")
+        y_true_val = zero_shot.make_true_labels(
+            cxr_true_labels_path=config.val_label_path,
+            cxr_labels=val_labels,
+            cutlabels=True  # Keep columns that correspond to val_labels
+        )
+
+        # Set input resolution based on model type
+        input_resolution = 224 if (not config.random_init or getattr(config, 'use_dinov2', False)) else 320
+        print(f"Using validation input resolution: {input_resolution}")
+
+        val_transform = Compose([
+            Normalize((101.48761, 101.48761, 101.48761), (83.43944, 83.43944, 83.43944)),
+            Resize(input_resolution, interpolation=InterpolationMode.BICUBIC),
+        ])
+
+        # Create validation dataset
+        print(f"Loading validation CXR data from: {config.val_cxr_filepath}")
+        val_dataset = zero_shot.CXRTestDataset(
+            img_path=config.val_cxr_filepath,
+            transform=val_transform,
+        )
+
+        # Create validation dataloader
+        val_loader = torch.utils.data.DataLoader(
+            val_dataset,
+            batch_size=config.val_batch_size,
+            shuffle=False,  # No need to shuffle for validation
+            num_workers=2,  # Adjust based on your system
+            pin_memory=True
+        )
+
+        print("Validation setup complete.")
+        return val_loader, y_true_val, val_labels, val_templates, input_resolution
+    
+    except Exception as e:
+        print(f"Warning: Failed to setup validation: {e}")
+        return None, None, None, None, None
 
 def make(config, cxr_filepath, txt_filepath, model_path=None): 
     '''

@@ -62,7 +62,8 @@ class CXRTestDataset(data.Dataset):
     
         return sample
 
-def load_clip(model_path, pretrained=False, context_length=77): 
+def load_clip(model_path, pretrained=False, context_length=77, 
+              use_dinov2=False, dinov2_model_name="dinov2_vitb14", freeze_dinov2=False): 
     """
     FUNCTION: load_clip
     ---------------------------------
@@ -84,6 +85,56 @@ def load_clip(model_path, pretrained=False, context_length=77):
         }
 
         model = CLIP(**params)
+        
+        # Replace visual encoder with DinoV2 if requested
+        if use_dinov2:
+            import timm
+            
+            # Load DinoV2 backbone
+            dinov2_backbone = timm.create_model(dinov2_model_name, pretrained=True)
+            
+            # Remove classification head
+            if hasattr(dinov2_backbone, 'head'):
+                dinov2_backbone.head = nn.Identity()
+            if hasattr(dinov2_backbone, 'fc'):
+                dinov2_backbone.fc = nn.Identity()
+            
+            # Get feature dimension
+            with torch.no_grad():
+                dummy_input = torch.randn(1, 3, 224, 224)
+                features = dinov2_backbone.forward_features(dummy_input)
+                if len(features.shape) == 3:  # [B, N, D]
+                    backbone_dim = features.shape[-1]
+                else:
+                    backbone_dim = features.shape[1]
+            
+            # Create simple wrapper class
+            class DinoV2Visual(nn.Module):
+                def __init__(self, backbone, backbone_dim, output_dim):
+                    super().__init__()
+                    self.backbone = backbone
+                    self.projection = nn.Linear(backbone_dim, output_dim)
+                    
+                def forward(self, x):
+                    features = self.backbone.forward_features(x)
+                    if len(features.shape) == 3:  # Use CLS token
+                        features = features[:, 0, :]
+                    elif len(features.shape) == 4:  # Global average pooling
+                        features = features.mean(dim=[2, 3])
+                    return self.projection(features)
+                
+                @property
+                def conv1(self):
+                    # Dummy property for dtype compatibility
+                    return self.projection
+            
+            # Replace visual encoder
+            model.visual = DinoV2Visual(dinov2_backbone, backbone_dim, params['embed_dim'])
+            
+            # Freeze backbone if requested
+            if freeze_dinov2:
+                for param in model.visual.backbone.parameters():
+                    param.requires_grad = False
     else: 
         model, preprocess = clip.load("ViT-B/32", device=device, jit=False) 
     try: 
