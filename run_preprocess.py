@@ -1,4 +1,6 @@
 import argparse
+import os
+import pandas as pd
 from pathlib import Path
 from data_process import get_cxr_paths_list, img_to_hdf5, get_cxr_path_csv, write_report_csv
 
@@ -7,7 +9,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--csv_out_path', type=str, default='data/cxr_paths.csv', help="Directory to save paths to all chest x-ray images in dataset.")
     parser.add_argument('--cxr_out_path', type=str, default='data/cxr.h5', help="Directory to save processed chest x-ray image data.")
-    parser.add_argument('--dataset_type', type=str, default='mimic', choices=['mimic', 'chexpert-test'], help="Type of dataset to pre-process")
+    parser.add_argument('--dataset_type', type=str, default='mimic', choices=['mimic', 'chexpert-test', 'chexpert-plus', 'rexgradient'], help="Type of dataset to pre-process")
     parser.add_argument('--mimic_impressions_path', default='data/mimic_impressions.csv', help="Directory to save extracted impressions from radiology reports.")
     parser.add_argument('--chest_x_ray_path', default='/deep/group/data/mimic-cxr/mimic-cxr-jpg/2.0.0/files', help="Directory where chest x-ray image data is stored. This should point to the files folder from the MIMIC chest x-ray dataset.")
     parser.add_argument('--radiology_reports_path', default='/deep/group/data/med-data/files/', help="Directory radiology reports are stored. This should point to the files folder from the MIMIC radiology reports dataset.")
@@ -35,6 +37,33 @@ if __name__ == "__main__":
         assert(len(cxr_paths) == 500)
        
         img_to_hdf5(cxr_paths, args.cxr_out_path, resolution=args.resolution)
+    
+    elif args.dataset_type == "chexpert-plus":
+        df = pd.read_csv("data/chexpert_train.csv")
+        df['path_to_image'] = df['path_to_image'].apply(lambda x: os.path.join(args.chest_x_ray_path, x))
+        cxr_paths = df['path_to_image'].tolist()
+        impressions = df['impression'].tolist()
+        
+        df_paths = pd.DataFrame({'Path': cxr_paths})
+        df_paths.to_csv(args.csv_out_path, index=False)
+        
+        img_to_hdf5(cxr_paths, args.cxr_out_path, resolution=args.resolution)
+        
+        df_impressions = pd.DataFrame({'filename': [Path(p).name for p in cxr_paths], 'impression': impressions})
+        df_impressions.to_csv(args.mimic_impressions_path, index=False)
+    
+    elif args.dataset_type == "rexgradient":
+        df = pd.read_csv("data/rexgradient_all.csv")
+        cxr_paths = df['path_to_image'].tolist()
+        impressions = df['Impression'].tolist()
+        
+        df_paths = pd.DataFrame({'Path': cxr_paths})
+        df_paths.to_csv(args.csv_out_path, index=False)
+        
+        img_to_hdf5(cxr_paths, args.cxr_out_path, resolution=args.resolution)
+        
+        df_impressions = pd.DataFrame({'filename': [Path(p).name for p in cxr_paths], 'impression': impressions})
+        df_impressions.to_csv(args.mimic_impressions_path, index=False)
     
     elif args.dataset_type == "padchest-test":
         df_padchest = pd.read_csv("csvs/padchest_test.csv")

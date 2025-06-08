@@ -32,7 +32,7 @@ def preprocess(img, desired_size=320):
     old_size = img.size
     ratio = float(desired_size)/max(old_size)
     new_size = tuple([int(x*ratio) for x in old_size])
-    img = img.resize(new_size, Image.ANTIALIAS)
+    img = img.resize(new_size, Image.LANCZOS)
     # create a new image and paste the resized on it
 
     new_img = Image.new('L', (desired_size, desired_size))
@@ -50,17 +50,17 @@ def img_to_hdf5(cxr_paths: List[Union[str, Path]], out_filepath: str, resolution
     with h5py.File(out_filepath,'w') as h5f:
         img_dset = h5f.create_dataset('cxr', shape=(dset_size, resolution, resolution))    
         for idx, path in enumerate(tqdm(cxr_paths)):
-            try: 
-                # read image using cv2
-                img = cv2.imread(str(path))
-                # convert to PIL Image object
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                img_pil = Image.fromarray(img)
-                # preprocess
-                img = preprocess(img_pil, desired_size=resolution)     
-                img_dset[idx] = img
-            except Exception as e: 
-                failed_images.append((path, e))
+            # try: 
+            # read image using cv2
+            img = cv2.imread(str(path))
+            # convert to PIL Image object
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img_pil = Image.fromarray(img)
+            # preprocess
+            img = preprocess(img_pil, desired_size=resolution)     
+            img_dset[idx] = img
+            # except Exception as e: 
+            #     failed_images.append((path, e))
     print(f"{len(failed_images)} / {len(cxr_paths)} images failed to be added to h5.", failed_images)
 
 def get_files(directory):
