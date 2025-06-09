@@ -1,10 +1,14 @@
 model.pt
+*.sh
 notebooks/.ipynb_checkpoints
 .ipynb_checkpoints
 __pycache__
+notebooks/*
 notebooks/clip_v1_0.1_state_dict.pt
 notebooks/models
 notebooks/train/wandb
 data_process.py
 notebooks/chexpert_plus.ipynb
 notebooks/rexgradient.ipynb
+notebooks/reports.ipynb
+notebooks/img_hdf5.ipynb

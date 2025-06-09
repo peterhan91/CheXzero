@@ -159,11 +159,12 @@ def load_clip(model_path=None, pretrained=False, context_length=77,
         # Replace visual encoder with DinoV2 if requested
         if use_dinov2:
             # Load DinoV2 backbone from official Facebook Research implementation
-            dinov2_backbone = torch.hub.load('facebookresearch/dinov2', dinov2_model_name, pretrained=True)
+            dinov2_backbone = torch.hub.load('facebookresearch/dinov2', dinov2_model_name+'_reg', pretrained=True)
+            dinov2_backbone = dinov2_backbone.to(device)  # Move to correct device
             
             # Get feature dimension using a dummy forward pass
             with torch.no_grad():
-                dummy_input = torch.randn(1, 3, 224, 224)
+                dummy_input = torch.randn(1, 3, 224, 224).to(device)  # Move dummy input to device
                 features = dinov2_backbone(dummy_input)  # forward() returns CLS token directly
                 backbone_dim = features.shape[-1]
             
@@ -199,6 +200,9 @@ def load_clip(model_path=None, pretrained=False, context_length=77,
     # if a model_path is provided, load in weights to backbone
     if model_path != None: 
         model.load_state_dict(torch.load(model_path, map_location=device))
+    
+    # Move entire model to device
+    model = model.to(device)
     return model
     
     

@@ -35,7 +35,24 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+def get_vit_variant(config):
+    """
+    Helper function to extract the ViT variant.
+    Returns None for this basic training script since it doesn't support DinoV2.
+    """
+    # This script doesn't support DinoV2, so no ViT variant modification needed
+    return None
+
 def model_pipeline(config, verbose=0): 
+    # Modify model_name to include ViT variant if applicable
+    vit_variant = get_vit_variant(config)
+    if vit_variant:
+        original_model_name = config.model_name
+        config.model_name = f"{original_model_name}_{vit_variant}"
+        print(f"Using checkpoint folder: {config.model_name} (ViT variant: {vit_variant})")
+    else:
+        print(f"Using checkpoint folder: {config.model_name}")
+    
     # make the model, data, and optimization problem
     model, data_loader, device, criterion, optimizer = make(config)
 
