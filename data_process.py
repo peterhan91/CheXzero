@@ -103,7 +103,7 @@ def write_report_csv(cxr_paths, txt_folder, out_path):
         study_num = tokens[-2]
         patient_num = tokens[-3]
         patient_group = tokens[-4]
-        txt_report = txt_folder + patient_group + '/' + patient_num + '/' + study_num + '.txt'
+        txt_report = txt_folder + '/' + patient_group + '/' + patient_num + '/' + study_num + '.txt'
         filename = study_num + '.txt'
         f = open(txt_report, 'r')
         s = f.read()
