@@ -9,7 +9,11 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--csv_out_path', type=str, default='data/cxr_paths.csv', help="Directory to save paths to all chest x-ray images in dataset.")
     parser.add_argument('--cxr_out_path', type=str, default='data/cxr.h5', help="Directory to save processed chest x-ray image data.")
-    parser.add_argument('--dataset_type', type=str, default='mimic', choices=['mimic', 'chexpert-test', 'chexpert-plus', 'rexgradient', 'chexpert-valid', 'padchest-test'], help="Type of dataset to pre-process")
+    parser.add_argument('--dataset_type', type=str, default='mimic', choices=['mimic', 'chexpert-test', 
+                                                                              'chexpert-plus', 'rexgradient', 
+                                                                              'chexpert-valid', 'padchest-test',
+                                                                              'vindrcxr-test', 'vindrpcxr-test'], 
+                                                                              help="Type of dataset to pre-process")
     parser.add_argument('--mimic_impressions_path', default='data/mimic_impressions.csv', help="Directory to save extracted impressions from radiology reports.")
     parser.add_argument('--chest_x_ray_path', default='/deep/group/data/mimic-cxr/mimic-cxr-jpg/2.0.0/files', help="Directory where chest x-ray image data is stored. This should point to the files folder from the MIMIC chest x-ray dataset.")
     parser.add_argument('--radiology_reports_path', default='/deep/group/data/med-data/files/', help="Directory radiology reports are stored. This should point to the files folder from the MIMIC radiology reports dataset.")
@@ -84,9 +88,22 @@ if __name__ == "__main__":
         cxr_paths = [os.path.join("/home/than/padchest/images/", p) for p in cxr_paths]
         assert len(cxr_paths) == 7943, f"Expected 7943 images, but got {len(cxr_paths)}"
        
-        img_to_hdf5(cxr_paths, args.cxr_out_path, resolution=args.resolution)           
-        
-        
-    
+        img_to_hdf5(cxr_paths, args.cxr_out_path, resolution=args.resolution)     
+
+    elif args.dataset_type == "vindrcxr-test":
+        df_vindrcxr = pd.read_csv("data/vindrcxr_test.csv")
+        cxr_paths = df_vindrcxr['image_id'].tolist()
+        cxr_paths = [os.path.join("/home/than/Datasets/CXR_VQA/OD/physionet.org/files/vindr-cxr/1.0.0/test_png/", p + '.png') for p in cxr_paths]
+        assert(len(cxr_paths) == 3000)
+
+        img_to_hdf5(cxr_paths, args.cxr_out_path, resolution=args.resolution)
+
+    elif args.dataset_type == "vindrpcxr-test":
+        df_vindrpcxr = pd.read_csv("data/vindrpcxr_test.csv")
+        cxr_paths = df_vindrpcxr['image_id'].tolist()
+        cxr_paths = [os.path.join("/home/than/Datasets/CXR_VQA/OD/physionet.org/files/vindr-pcxr/1.0.0/test_png/", p + '.png') for p in cxr_paths]
+        assert(len(cxr_paths) == 1397)
+
+        img_to_hdf5(cxr_paths, args.cxr_out_path, resolution=args.resolution)
 
 

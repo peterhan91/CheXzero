@@ -1,6 +1,5 @@
 import os
 import argparse
-import glob
 import h5py
 import pandas as pd
 import numpy as np
@@ -12,7 +11,10 @@ import torch
 import torch.optim as optim
 from torch import nn
 from torch.utils import data
+from torch.utils.data.distributed import DistributedSampler
 from torchvision.transforms import Compose, Normalize, Resize, InterpolationMode
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 from eval import evaluate
 from train import load_data, load_clip, preprocess_text, setup_validation
@@ -78,19 +80,39 @@ class MultiCXRDataset(data.Dataset):
         
         return {'img': img, 'txt': txt}
 
-def load_multi_data(dataset_paths, batch_size=64, column='impression', pretrained=False, use_dinov2=False):
+def load_multi_data(dataset_paths, batch_size=64, column='impression', pretrained=False, use_dinov2=False, use_ddp=False, rank=0):
+    """
+    Load multiple CXR datasets with DDP support.
+    
+    Args:
+        dataset_paths: List of 'img_path,txt_path' pairs
+        batch_size: Batch size per GPU
+        column: Text column to use from CSV
+        pretrained: Whether using pretrained models
+        use_dinov2: Whether using DinoV2 vision encoder
+        use_ddp: Whether using distributed training
+        rank: GPU rank for DDP
+    
+    Returns:
+        data_loader: DataLoader with DistributedSampler if DDP enabled
+        device: CUDA device for this rank
+    """
     if torch.cuda.is_available():
-        dev = "cuda:0"
+        if use_ddp:
+            dev = f"cuda:{rank}"
+            device = torch.device(dev)
+            torch.cuda.set_device(device)
+        else:
+            dev = "cuda:0"
+            device = torch.device(dev)
+            torch.cuda.set_device(device)
         cuda_available = True
-        print('Using CUDA.')
+        print(f'Using CUDA device: {dev}')
     else:
         dev = "cpu"
         cuda_available = False
+        device = torch.device(dev)
         print('Using cpu.')
-    
-    device = torch.device(dev)
-    if cuda_available:
-        torch.cuda.set_device(device)
     
     if pretrained or use_dinov2:
         input_resolution = 448
@@ -111,7 +133,14 @@ def load_multi_data(dataset_paths, batch_size=64, column='impression', pretraine
         print("Finished image transforms for clip model.")
     
     torch_dset = MultiCXRDataset(dataset_paths=dataset_paths, column=column, transform=transform)
-    loader_params = {'batch_size': batch_size, 'shuffle': True, 'num_workers': 8, 'pin_memory': True}
+    
+    # Configure loader parameters for DDP
+    if use_ddp:
+        sampler = DistributedSampler(torch_dset, num_replicas=None, rank=None, shuffle=True)
+        loader_params = {'batch_size': batch_size, 'sampler': sampler, 'num_workers': 8, 'pin_memory': True}
+    else:
+        loader_params = {'batch_size': batch_size, 'shuffle': True, 'num_workers': 8, 'pin_memory': True}
+    
     data_loader = data.DataLoader(torch_dset, **loader_params)
     return data_loader, device
 
@@ -139,7 +168,7 @@ def parse_args():
     parser.add_argument('--context_length', type=int, default=77)
     parser.add_argument('--random_init', type=bool, default=True)
     parser.add_argument('--model_name', type=str, default="dinov2-multi-v1.0")
-    parser.add_argument('--do_validate', type=bool, default=True)
+    parser.add_argument('--do_validate', action='store_true', help='Enable validation during training')
     parser.add_argument('--valid_interval', type=int, default=200)
     parser.add_argument('--val_cxr_filepath', type=str, default='data/chexpert_valid.h5')
     parser.add_argument('--val_label_path', type=str, default='data/chexpert_valid.csv')
@@ -163,8 +192,28 @@ def parse_args():
     parser.add_argument('--min_delta', type=float, default=0.001, help='Minimum change to qualify as an improvement')
     parser.add_argument('--early_stopping_metric', type=str, default='mean_auc', 
                         choices=['mean_auc', 'loss'], help='Metric to use for early stopping')
+    # DDP arguments
+    parser.add_argument('--use_ddp', action='store_true', help='Use Distributed Data Parallel training')
+    parser.add_argument('--backend', type=str, default='nccl', help='DDP backend')
     args = parser.parse_args()
     return args
+
+def setup_ddp(backend='nccl'):
+    """Initialize the distributed environment using torchrun."""
+    try:
+        dist.init_process_group(backend)
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+        torch.cuda.set_device(rank)
+        print(f"Successfully initialized DDP on rank {rank}/{world_size}")
+        return rank, world_size
+    except Exception as e:
+        print(f"Failed to initialize DDP: {e}")
+        raise
+
+def cleanup_ddp():
+    """Clean up the distributed environment."""
+    dist.destroy_process_group()
 
 def get_vit_variant(config):
     """
@@ -183,6 +232,59 @@ def get_vit_variant(config):
     return None
 
 def model_pipeline(config, verbose=0):
+    if config.use_ddp:
+        # DDP training (launched with torchrun)
+        ddp_main(config, verbose)
+    else:
+        # Regular single GPU training
+        single_gpu_pipeline(config, verbose)
+
+def ddp_main(config, verbose=0):
+    """Main function for DDP training (called by torchrun)."""
+    
+    # Initialize DDP and get rank/world_size
+    rank, world_size = setup_ddp(config.backend)
+    print(f"Running DDP process on rank {rank}")
+    
+    # Set random seed for reproducibility (same seed for all ranks)
+    torch.manual_seed(config.seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = True
+
+    # Modify model_name to include ViT variant for DinoV2 models
+    vit_variant = get_vit_variant(config)
+    if vit_variant:
+        original_model_name = config.model_name
+        config.model_name = f"{original_model_name}_{vit_variant}"
+        if rank == 0:  # Only print from main process
+            print(f"Using checkpoint folder: {config.model_name} (ViT variant: {vit_variant})")
+    else:
+        if rank == 0:
+            print(f"Using checkpoint folder: {config.model_name}")
+
+    try:
+        model, data_loader, device, criterion, optimizer, scheduler, scaler = make(config, rank)
+        train(model, data_loader, device, criterion, optimizer, scheduler, scaler, config, rank)
+
+        # Save model only from rank 0
+        if rank == 0:
+            model_path = os.path.join(config.save_dir, str(config.model_name), 'checkpoint.pt')
+            # Extract the actual model from DDP wrapper for saving
+            model_to_save = model.module if hasattr(model, 'module') else model
+            save(model_to_save, model_path)
+
+            # Run final testing if requested
+            if config.test_after_training:
+                run_final_testing(config)
+
+        if verbose and rank == 0:
+            print(model)
+            
+    finally:
+        cleanup_ddp()
+
+def single_gpu_pipeline(config, verbose=0):
+    """Original single GPU pipeline."""
     torch.manual_seed(config.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
@@ -210,7 +312,7 @@ def model_pipeline(config, verbose=0):
         print(model)
     return model
 
-def make(config):
+def make(config, rank=0):
     pretrained = not config.random_init
     
     if config.use_multi_datasets:
@@ -219,16 +321,32 @@ def make(config):
             batch_size=config.batch_size,
             column="impression",
             pretrained=pretrained,
-            use_dinov2=config.use_dinov2
+            use_dinov2=config.use_dinov2,
+            use_ddp=config.use_ddp,
+            rank=rank
         )
     else:
-        data_loader, device = load_data(
-            config.cxr_filepath, config.txt_filepath, 
-            batch_size=config.batch_size, 
-            pretrained=pretrained, 
-            use_dinov2=config.use_dinov2,
-            column="impression"
-        )
+        # For single dataset, use multi_data with single path when DDP is enabled
+        if config.use_ddp:
+            dataset_paths = [f"{config.cxr_filepath},{config.txt_filepath}"]
+            data_loader, device = load_multi_data(
+                dataset_paths=dataset_paths,
+                batch_size=config.batch_size,
+                column="impression",
+                pretrained=pretrained,
+                use_dinov2=config.use_dinov2,
+                use_ddp=config.use_ddp,
+                rank=rank
+            )
+        else:
+            data_loader, device = load_data(
+                config.cxr_filepath, config.txt_filepath, 
+                batch_size=config.batch_size, 
+                pretrained=pretrained, 
+                use_dinov2=config.use_dinov2,
+                column="impression"
+            )
+    
     model = load_clip(
         model_path=None, 
         pretrained=pretrained, 
@@ -238,7 +356,13 @@ def make(config):
         freeze_dinov2=config.freeze_dinov2
     )
     model.to(device)
-    print('Model on Device.')
+    
+    # Wrap model with DDP if enabled
+    if config.use_ddp:
+        model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=True)
+        print(f'Model wrapped with DDP on rank {rank}.')
+    else:
+        print('Model on Device.')
 
     criterion = nn.CrossEntropyLoss().cuda()
 
@@ -258,41 +382,48 @@ def make(config):
     scaler = torch.amp.GradScaler("cuda")
     return model, data_loader, device, criterion, optimizer, scheduler, scaler
 
-def train(model, loader, device, criterion, optimizer, scheduler, scaler, config):
+def train(model, loader, device, criterion, optimizer, scheduler, scaler, config, rank=0):
     model.train()
-    val_loader, y_true_val, val_labels, val_templates, _ = setup_validation(config)
-    validation_enabled = val_loader is not None
     
-    model_save_dir = os.path.join(config.save_dir, config.model_name)
-    os.makedirs(model_save_dir, exist_ok=True)
+    # Only setup validation on rank 0 to avoid conflicts
+    if rank == 0:
+        val_loader, y_true_val, val_labels, val_templates, _ = setup_validation(config)
+        validation_enabled = val_loader is not None
+        
+        model_save_dir = os.path.join(config.save_dir, config.model_name)
+        os.makedirs(model_save_dir, exist_ok=True)
 
-    # Initialize validation log file
-    val_log_path = os.path.join(model_save_dir, "validation_log.txt")
-    with open(val_log_path, 'w') as f:
-        f.write("Step,Epoch,Mean_AUC,Atelectasis_AUC,Cardiomegaly_AUC,Consolidation_AUC,Edema_AUC,Pleural_Effusion_AUC\n")
+        # Initialize validation log file
+        val_log_path = os.path.join(model_save_dir, "validation_log.txt")
+        with open(val_log_path, 'w') as f:
+            f.write("Step,Epoch,Mean_AUC,Atelectasis_AUC,Cardiomegaly_AUC,Consolidation_AUC,Edema_AUC,Pleural_Effusion_AUC\n")
 
-    total_batches = len(loader) * config.epochs
+        # Best model tracking variables 
+        best_metric = float('-inf') if config.early_stopping_metric == 'mean_auc' else float('inf')
+        epochs_without_improvement = 0
+        best_epoch = 0
+        best_step = 0
+    else:
+        validation_enabled = False
+
     example_ct = 0
     batch_ct = 0
     running_loss = 0.0
 
-    # Best model tracking variables 
-    best_metric = float('-inf') if config.early_stopping_metric == 'mean_auc' else float('inf')
-    epochs_without_improvement = 0
-    best_epoch = 0
-    best_step = 0
-
     optimizer.zero_grad()
 
     for epoch in range(config.epochs):
-        epoch_loss = 0.0
-        batch_count_in_epoch = 0
+        # Set epoch for distributed sampler to ensure proper data shuffling
+        if hasattr(loader.sampler, 'set_epoch'):
+            loader.sampler.set_epoch(epoch)
             
-        for data in tqdm(loader):
+        for data in tqdm(loader, disable=(rank != 0)):  # Only show progress bar on rank 0
             images = data['img'].to(device)
-            texts = preprocess_text(data['txt'], model).to(device)
+            # Get the actual model for text preprocessing (unwrap DDP if needed)
+            model_for_text = model.module if hasattr(model, 'module') else model
+            texts = preprocess_text(data['txt'], model_for_text).to(device)
 
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast('cuda'):
                 logits_per_image, logits_per_text = model(images, texts)
                 labels = torch.arange(images.size(0), device=device)
                 loss_img = criterion(logits_per_image, labels)
@@ -310,52 +441,66 @@ def train(model, loader, device, criterion, optimizer, scheduler, scaler, config
             example_ct += images.size(0)
             batch_ct += 1
             running_loss += loss.item()
-            epoch_loss += loss.item()
-            batch_count_in_epoch += 1
 
-            if batch_ct % config.log_interval == 0:
-                train_log(running_loss / config.log_interval, example_ct, epoch)
-                running_loss = 0.0
+            # Only log and validate from rank 0
+            if rank == 0:
+                if batch_ct % config.log_interval == 0:
+                    train_log(running_loss / config.log_interval, example_ct, epoch)
+                    running_loss = 0.0
 
-            if config.do_validate and validation_enabled and (batch_ct % config.valid_interval) == 0:
-                val_results_df = run_validation_step(model, val_loader, y_true_val, val_labels, val_templates, device, config)
-                
-                # Calculate mean AUC for key pathologies
-                key_pathologies = ['Atelectasis_auc', 'Cardiomegaly_auc', 'Consolidation_auc', 'Edema_auc', 'Pleural Effusion_auc']
-                available_cols = [col for col in key_pathologies if col in val_results_df.columns]
-                if available_cols:
-                    current_auc = val_results_df[available_cols].mean().mean()
-                else:
-                    auc_cols = [col for col in val_results_df.columns if col.endswith('_auc')]
-                    current_auc = val_results_df[auc_cols].mean().mean() if auc_cols else 0
-                
-                # Log validation results
-                with open(val_log_path, 'a') as f:
-                    auc_values = [val_results_df[col].iloc[0] if col in val_results_df.columns else 0 for col in key_pathologies]
-                    f.write(f"{batch_ct},{epoch},{current_auc:.4f},{','.join(f'{v:.4f}' for v in auc_values)}\n")
-                
-                print(f"Validation at step {batch_ct}: Mean AUC = {current_auc:.4f}")
-                
-                # Check if this is the best model so far
-                if current_auc > best_metric + config.min_delta:
-                    best_metric = current_auc
-                    best_step = batch_ct
-                    best_epoch = epoch
-                    epochs_without_improvement = 0
-                    # Save best model
-                    best_model_path = os.path.join(model_save_dir, "best_model.pt")
-                    save(model, best_model_path)
-                    print(f"New best model saved! AUC: {current_auc:.4f} at step {batch_ct}")
-                else:
-                    epochs_without_improvement += 1
+                if config.do_validate and validation_enabled and (batch_ct % config.valid_interval) == 0:
+                    # Get the actual model for validation (unwrap DDP if needed)
+                    model_for_validation = model.module if hasattr(model, 'module') else model
+                    val_results_df = run_validation_step(model_for_validation, val_loader, y_true_val, val_labels, val_templates, device, config)
+                    
+                    # Calculate mean AUC for key pathologies
+                    key_pathologies = ['Atelectasis_auc', 'Cardiomegaly_auc', 'Consolidation_auc', 'Edema_auc', 'Pleural Effusion_auc']
+                    available_cols = [col for col in key_pathologies if col in val_results_df.columns]
+                    if available_cols:
+                        current_auc = val_results_df[available_cols].mean().mean()
+                    else:
+                        auc_cols = [col for col in val_results_df.columns if col.endswith('_auc')]
+                        current_auc = val_results_df[auc_cols].mean().mean() if auc_cols else 0
+                    
+                    # Log validation results
+                    with open(val_log_path, 'a') as f:
+                        auc_values = [val_results_df[col].iloc[0] if col in val_results_df.columns else 0 for col in key_pathologies]
+                        f.write(f"{batch_ct},{epoch},{current_auc:.4f},{','.join(f'{v:.4f}' for v in auc_values)}\n")
+                    
+                    print(f"Validation at step {batch_ct}: Mean AUC = {current_auc:.4f}")
+                    
+                    # Check if this is the best model so far
+                    if current_auc > best_metric + config.min_delta:
+                        best_metric = current_auc
+                        best_step = batch_ct
+                        best_epoch = epoch
+                        epochs_without_improvement = 0
+                        # Save best model (unwrap DDP if needed)
+                        best_model_path = os.path.join(model_save_dir, "best_model.pt")
+                        model_to_save = model.module if hasattr(model, 'module') else model
+                        save(model_to_save, best_model_path)
+                        print(f"New best model saved! AUC: {current_auc:.4f} at step {batch_ct}")
+                    else:
+                        epochs_without_improvement += 1
         
-                # Early stopping check at the end of each epoch
-        if config.early_stopping:
-            # Check if we should stop based on validation intervals
+        # Early stopping check at the end of each epoch (DDP-safe)
+        should_stop = False
+        if config.early_stopping and rank == 0:
             if epochs_without_improvement >= config.patience:
                 print(f"Early stopping triggered! No improvement for {config.patience} validation intervals.")
                 print(f"Best mean AUC: {best_metric:.4f} achieved at step {best_step} (epoch {best_epoch})")
-                break
+                should_stop = True
+        
+        # Synchronize early stopping decision across all processes
+        if config.use_ddp:
+            # Broadcast early stopping decision from rank 0 to all ranks
+            stop_tensor = torch.tensor(should_stop, dtype=torch.bool, device=device)
+            dist.broadcast(stop_tensor, src=0)
+            should_stop = stop_tensor.item()
+            dist.barrier()
+        
+        if should_stop:
+            break
         
         # Reset running loss for next epoch
         running_loss = 0.0
