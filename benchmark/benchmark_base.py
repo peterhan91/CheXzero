@@ -136,26 +136,29 @@ def evaluate_predictions(y_pred, y_true, labels):
 def setup_test_data(dataset_name, batch_size=64, input_resolution=448):
     """Setup test dataset and labels for a given dataset."""
     
+    # Get the absolute path to the data directory
+    data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
+    
     # Dataset configurations (paths only)
     dataset_configs = {
         'chexpert_test': {
-            'img_path': 'data/chexpert_test.h5',
-            'label_path': 'data/chexpert_test.csv',
+            'img_path': os.path.join(data_dir, 'chexpert_test.h5'),
+            'label_path': os.path.join(data_dir, 'chexpert_test.csv'),
             'templates': [("{}", "no {}")]
         },
         'padchest_test': {
-            'img_path': 'data/padchest_test.h5',
-            'label_path': 'data/padchest_test.csv',
+            'img_path': os.path.join(data_dir, 'padchest_test.h5'),
+            'label_path': os.path.join(data_dir, 'padchest_test.csv'),
             'templates': [("{}", "no {}")]
         },
         'vindrcxr_test': {
-            'img_path': 'data/vindrcxr_test.h5',
-            'label_path': 'data/vindrcxr_test.csv',
+            'img_path': os.path.join(data_dir, 'vindrcxr_test.h5'),
+            'label_path': os.path.join(data_dir, 'vindrcxr_test.csv'),
             'templates': [("{}", "no {}")]
         },
         'vindrpcxr_test': {
-            'img_path': 'data/vindrpcxr_test.h5',
-            'label_path': 'data/vindrpcxr_test.csv',
+            'img_path': os.path.join(data_dir, 'vindrpcxr_test.h5'),
+            'label_path': os.path.join(data_dir, 'vindrpcxr_test.csv'),
             'templates': [("{}", "no {}")]
         }
     }

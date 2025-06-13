@@ -1,5 +1,8 @@
 model.pt
 external_sota/*
+concepts/results/*
+concepts/embeddings/*
+concepts/mimic_concepts.csv
 *.sh
 notebooks/.ipynb_checkpoints
 .ipynb_checkpoints
