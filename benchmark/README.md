@@ -4,7 +4,7 @@ A comprehensive benchmarking framework for evaluating vision-language models on 
 
 ## Overview
 
-This benchmark suite evaluates multiple state-of-the-art models on four CXR testing datasets using zero-shot classification with ROC-AUC as the primary metric.
+This benchmark suite evaluates multiple state-of-the-art models on five CXR testing datasets using zero-shot classification with ROC-AUC as the primary metric.
 
 ### Models Evaluated
 
@@ -27,6 +27,7 @@ This benchmark suite evaluates multiple state-of-the-art models on four CXR test
 - `padchest_test`: Key pathology subset (5 labels)
 - `vindrcxr_test`: 28 pathology labels
 - `vindrpcxr_test`: 15 pediatric pathology labels
+- `indiana_test`: Indiana University chest X-ray collection with pathology labels
 
 All datasets are stored as H5 image files with corresponding CSV labels in the `data/` folder.
 

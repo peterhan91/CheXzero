@@ -14,8 +14,11 @@ from pathlib import Path
 # Add the parent directory to Python path to import from the main codebase
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Add the official CheXzero code directory to Python path
-chexzero_code_path = "/home/than/DeepLearning/cxr_concept/CheXzero/external_sota/chexzero/code/CheXzero"
+# Add the official CheXzero code directory to Python path  
+# Use relative path from the current script location
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+chexzero_code_path = os.path.join(project_root, "external_sota", "chexzero", "code", "CheXzero")
 sys.path.insert(0, chexzero_code_path)
 
 # Force tqdm to use console mode to avoid jupyter widget issues
@@ -36,9 +39,13 @@ def load_chexzero_model(device):
         from model import CLIP  # Import CLIP model from official CheXzero model.py
         from zero_shot import load_clip  # Use official CheXzero zero_shot load_clip function
         
-        # Try to find CheXzero checkpoint using official structure
+        # Try to find CheXzero checkpoint using relative paths
         possible_paths = [
-           "/home/than/DeepLearning/CheXzero/checkpoints/CheXzero_Models/best_64_5e-05_original_22000_0.864.pt"
+            # Try relative paths from project root
+            "../CheXzero/checkpoints/CheXzero_Models/best_64_5e-05_original_22000_0.864.pt",
+            "external_sota/chexzero/checkpoints/best_64_5e-05_original_22000_0.864.pt",
+            # Fallback to absolute path if others don't work
+            "/home/than/DeepLearning/CheXzero/checkpoints/CheXzero_Models/best_64_5e-05_original_22000_0.864.pt"
         ]
         
         model_path = None
@@ -92,7 +99,7 @@ def load_chexzero_model(device):
         print(f"Error loading CheXzero model: {e}")
         raise
 
-def run_chexzero_evaluation(model, dataloader, y_true, labels, templates, device, context_length=77):
+def run_chexzero_evaluation(model, dataloader, y_true, labels, templates, device, context_length=77, save_detailed=False, model_name=None, dataset_name=None):
     """
     Run zero-shot evaluation using CheXzero model with full device compatibility.
     Implements the same algorithm as CheXzero's run_softmax_eval but with proper device handling.
@@ -169,6 +176,24 @@ def run_chexzero_evaluation(model, dataloader, y_true, labels, templates, device
     # Evaluate using our common evaluation function
     results_df = evaluate_predictions(y_pred, y_true, labels)
     
+    # Save detailed results if requested
+    if save_detailed and model_name and dataset_name:
+        from benchmark_base import save_detailed_results
+        config_data = {
+            "model_name": model_name,
+            "dataset": dataset_name,
+            "method": "chexzero_zero_shot",
+            "test_batch_size": dataloader.batch_size,
+            "templates": [pos_template, neg_template],
+            "context_length": context_length,
+            "num_images": len(y_pred),
+            "num_labels": len(labels),
+            "labels": labels,
+            "input_resolution": 224
+        }
+        save_detailed_results(y_pred, y_true, labels, model_name, dataset_name, config_data)
+        return results_df, y_pred
+    
     return results_df
 
 def benchmark_chexzero(datasets, device):
@@ -200,8 +225,9 @@ def benchmark_chexzero(datasets, device):
             )
             
             # Run evaluation using official CheXzero pattern
-            results_df = run_chexzero_evaluation(
-                model, dataloader, y_true, labels, templates, device, context_length=77
+            results_df, y_pred = run_chexzero_evaluation(
+                model, dataloader, y_true, labels, templates, device, context_length=77, 
+                save_detailed=True, model_name="chexzero", dataset_name=dataset_name
             )
             
             # Save results
@@ -216,7 +242,7 @@ def benchmark_chexzero(datasets, device):
 def main():
     parser = argparse.ArgumentParser(description="Benchmark CheXzero model")
     parser.add_argument('--datasets', nargs='+', 
-                        default=['chexpert_test', 'padchest_test', 'vindrcxr_test', 'vindrpcxr_test'],
+                        default=['chexpert_test', 'padchest_test', 'vindrcxr_test', 'vindrpcxr_test', 'indiana_test'],
                         help='Datasets to evaluate on')
     parser.add_argument('--device', type=str, default='auto',
                         help='Device to run on (auto, cpu, cuda)')

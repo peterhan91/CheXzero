@@ -65,7 +65,22 @@ class CXRTestDataset(Dataset):
 def make_true_labels(label_path, labels, cutlabels=True):
     """Create ground truth labels array from CSV file."""
     df = pd.read_csv(label_path)
-    
+    # check if this is Indiana dataset (has Study column)
+    if 'uid' in df.columns:
+        exclude_cols = ['uid', 'filename', 'projection', 'MeSH', 
+                        'Problems', 'image', 'indication', 'comparison', 
+                        'findings', 'impression']
+        available_labels = [col for col in df.columns if col not in exclude_cols]
+        # Map labels to available ones
+        final_labels = []
+        for label in labels:
+            if label in available_labels:
+                final_labels.append(label)
+            elif label.lower() in available_labels:
+                final_labels.append(label.lower())
+        labels = final_labels
+        df.columns = [col.lower() if col not in exclude_cols else col for col in df.columns]
+
     # Check if this is PadChest (has ImageID column)
     if 'ImageID' in df.columns:
         # For PadChest, filter by available labels and convert to lowercase
@@ -160,6 +175,11 @@ def setup_test_data(dataset_name, batch_size=64, input_resolution=448):
             'img_path': os.path.join(data_dir, 'vindrpcxr_test.h5'),
             'label_path': os.path.join(data_dir, 'vindrpcxr_test.csv'),
             'templates': [("{}", "no {}")]
+        },
+        'indiana_test': {
+            'img_path': os.path.join(data_dir, 'indiana_test.h5'),
+            'label_path': os.path.join(data_dir, 'indiana_test.csv'),
+            'templates': [("{}", "no {}")]
         }
     }
     
@@ -178,7 +198,7 @@ def setup_test_data(dataset_name, batch_size=64, input_resolution=448):
     df = pd.read_csv(config['label_path'], nrows=0)  # Read only header
     
     # Get all columns except non-label columns
-    exclude_columns = {'Study', 'Path', 'image_id', 'ImageID', 'name', 'is_test'}
+    exclude_columns = {'Study', 'Path', 'image_id', 'ImageID', 'name', 'is_test', 'uid', 'filename', 'projection', 'MeSH', 'Problems', 'image', 'indication', 'comparison', 'findings', 'impression'}
     all_columns = set(df.columns)
     label_columns = all_columns - exclude_columns
     labels = sorted(list(label_columns))  # Sort for consistency
@@ -225,7 +245,118 @@ def save_results(results_df, model_name, dataset_name, output_dir="benchmark/res
             auc = results_df[pathology].iloc[0]
             print(f"{pathology}: {auc:.4f}")
 
-def run_zero_shot_evaluation(model, dataloader, y_true, labels, templates, device, context_length=77):
+def save_detailed_results(y_pred, y_true, labels, model_name, dataset_name, config_data=None, output_dir=None):
+    """
+    Save detailed results including predictions and ground truth in the same format as concept-based evaluation.
+    This enables bootstrapping analysis and detailed comparison.
+    """
+    from datetime import datetime
+    import json
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Set default output directory to benchmark/results if not specified
+    if output_dir is None:
+        # Get the directory where this script is located (benchmark/)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        output_dir = os.path.join(script_dir, "results")
+    
+    # Create output directory following the concept-based evaluation structure
+    results_dir = os.path.join(output_dir, f"benchmark_evaluation_{dataset_name}_{model_name}")
+    os.makedirs(results_dir, exist_ok=True)
+    
+    print(f"Saving detailed results to: {results_dir}")
+    
+    # Create ground truth DataFrame with _true suffix
+    gt_columns = [f"{label}_true" for label in labels]
+    gt_df = pd.DataFrame(y_true, columns=gt_columns)
+    
+    # Create predictions DataFrame with _pred suffix  
+    pred_columns = [f"{label}_pred" for label in labels]
+    pred_df = pd.DataFrame(y_pred, columns=pred_columns)
+    
+    # Save ground truth and predictions
+    gt_path = os.path.join(results_dir, f"ground_truth_{timestamp}.csv")
+    pred_path = os.path.join(results_dir, f"predictions_{timestamp}.csv")
+    
+    gt_df.to_csv(gt_path, index=False)
+    pred_df.to_csv(pred_path, index=False)
+    
+    print(f"Saved ground truth: {gt_path}")
+    print(f"Saved predictions: {pred_path}")
+    
+    # Compute detailed AUC metrics
+    from sklearn.metrics import roc_auc_score
+    detailed_aucs = {}
+    valid_aucs = []
+    
+    for i, label in enumerate(labels):
+        try:
+            # Skip if all ground truth labels are the same
+            if len(np.unique(y_true[:, i])) < 2:
+                print(f"Warning: Skipping {label} - all labels are the same value")
+                detailed_aucs[f"{label}_auc"] = np.nan
+                continue
+                
+            auc = roc_auc_score(y_true[:, i], y_pred[:, i])
+            detailed_aucs[f"{label}_auc"] = auc
+            valid_aucs.append(auc)
+            
+        except Exception as e:
+            print(f"Error computing AUC for {label}: {e}")
+            detailed_aucs[f"{label}_auc"] = np.nan
+    
+    # Calculate mean AUC
+    if valid_aucs:
+        detailed_aucs['mean_auc'] = np.mean(valid_aucs)
+    else:
+        detailed_aucs['mean_auc'] = np.nan
+    
+    # Save detailed AUCs
+    aucs_df = pd.DataFrame([detailed_aucs])
+    aucs_path = os.path.join(results_dir, f"detailed_aucs_{timestamp}.csv")
+    aucs_df.to_csv(aucs_path, index=False)
+    
+    # Save configuration
+    if config_data is None:
+        config_data = {
+            "model_name": model_name,
+            "dataset": dataset_name,
+            "method": "zero_shot_benchmark",
+            "timestamp": timestamp,
+            "num_images": len(y_pred),
+            "num_labels": len(labels),
+            "labels": labels
+        }
+    
+    config_data["timestamp"] = timestamp
+    config_path = os.path.join(results_dir, f"config_{timestamp}.json")
+    with open(config_path, 'w') as f:
+        json.dump(config_data, f, indent=2)
+    
+    # Save summary
+    summary_data = {
+        "timestamp": timestamp,
+        "model_name": model_name,
+        "dataset": dataset_name,
+        "mean_auc": float(detailed_aucs['mean_auc']) if not np.isnan(detailed_aucs['mean_auc']) else None,
+        "total_labels": len(labels),
+        "valid_labels": len(valid_aucs),
+        "detailed_aucs": {k: float(v) if not np.isnan(v) else None for k, v in detailed_aucs.items()}
+    }
+    
+    summary_path = os.path.join(results_dir, f"summary_{timestamp}.json")
+    with open(summary_path, 'w') as f:
+        json.dump(summary_data, f, indent=2, default=str)
+    
+    print(f"Saved detailed AUCs: {aucs_path}")
+    print(f"Saved config: {config_path}")
+    print(f"Saved summary: {summary_path}")
+    print(f"📊 Mean AUC: {detailed_aucs['mean_auc']:.4f}" if not np.isnan(detailed_aucs['mean_auc']) else "📊 Mean AUC: N/A")
+    
+    return results_dir, timestamp
+
+def run_zero_shot_evaluation(model, dataloader, y_true, labels, templates, device, context_length=77, save_detailed=False, model_name=None, dataset_name=None):
     """
     Run zero-shot evaluation on a dataset using a CLIP-like model.
     
@@ -237,9 +368,13 @@ def run_zero_shot_evaluation(model, dataloader, y_true, labels, templates, devic
         templates: List of (positive_template, negative_template) tuples
         device: torch device
         context_length: Maximum sequence length for text encoding
+        save_detailed: Whether to save detailed predictions and ground truth
+        model_name: Name of the model (required if save_detailed=True)
+        dataset_name: Name of the dataset (required if save_detailed=True)
         
     Returns:
         results_df: DataFrame with evaluation results
+        y_pred (optional): Prediction probabilities if save_detailed=True
     """
     import clip  # Import here to avoid dependency issues
     
@@ -283,5 +418,21 @@ def run_zero_shot_evaluation(model, dataloader, y_true, labels, templates, devic
     
     # Evaluate
     results_df = evaluate_predictions(y_pred, y_true, labels)
+    
+    # Save detailed results if requested
+    if save_detailed and model_name and dataset_name:
+        config_data = {
+            "model_name": model_name,
+            "dataset": dataset_name,
+            "method": "zero_shot_benchmark",
+            "test_batch_size": dataloader.batch_size,
+            "templates": [pos_template, neg_template],
+            "context_length": context_length,
+            "num_images": len(y_pred),
+            "num_labels": len(labels),
+            "labels": labels
+        }
+        save_detailed_results(y_pred, y_true, labels, model_name, dataset_name, config_data)
+        return results_df, y_pred
     
     return results_df 

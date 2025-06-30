@@ -172,6 +172,17 @@ def get_dataset_config(dataset_name):
             'labels': all_disease_labels,
             'core_conditions': ['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Pleural Effusion']
         }
+    elif dataset_name == "indiana_test":
+        df = pd.read_csv("/home/than/DeepLearning/cxr_concept/CheXzero/data/indiana_test.csv")
+        # Exclude Indiana-specific non-pathology columns
+        exclude_cols = ['uid', 'filename', 'projection', 'MeSH', 'Problems', 'image', 'indication', 'comparison', 'findings', 'impression']
+        all_disease_labels = [col for col in df.columns if col not in exclude_cols]
+        return {
+            'cxr_filepath': "/home/than/DeepLearning/cxr_concept/CheXzero/data/indiana_test.h5",
+            'labels_path': "/home/than/DeepLearning/cxr_concept/CheXzero/data/indiana_test.csv",
+            'labels': all_disease_labels,
+            'core_conditions': ['pulmonary atelectasis', 'cardiomegaly', 'consolidation', 'pulmonary edema', 'pleural effusion', 'pneumonia', 'pneumothorax']
+        }
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}")
 
@@ -492,13 +503,14 @@ if __name__ == "__main__":
     # Define datasets and LLM models
     datasets = [
                 # "chexpert", 
-                "padchest",
-                "vindrcxr"
+                # "padchest",
+                # "vindrcxr",
+                "indiana_test"
                 ]
     llm_models = [
-                # "openai_small", 
+                "openai_small", 
                 "qwen3_8b", 
-                # "sfr_mistral", 
+                "sfr_mistral", 
                 "biomedbert"
                 ]
     

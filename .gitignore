@@ -4,6 +4,12 @@ concepts/results/*
 concepts/embeddings/*
 concepts/mimic_concepts.csv
 *.sh
+*.pkl
+*.png
+*.json
+multimodal_nejm/cxr_cases/*
+multimodal_nejm/results/*
+plots/*
 notebooks/.ipynb_checkpoints
 .ipynb_checkpoints
 __pycache__

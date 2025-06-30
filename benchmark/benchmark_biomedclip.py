@@ -69,7 +69,7 @@ def load_biomedclip_model(device):
         print(f"Error loading BiomedCLIP model: {e}")
         raise
 
-def run_biomedclip_evaluation(model, dataloader, y_true, labels, templates, device, context_length=256):
+def run_biomedclip_evaluation(model, dataloader, y_true, labels, templates, device, context_length=256, save_detailed=False, model_name=None, dataset_name=None):
     """
     Run zero-shot evaluation using BiomedCLIP model following EXACT official pattern.
     Based on official example: https://huggingface.co/microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224
@@ -137,6 +137,24 @@ def run_biomedclip_evaluation(model, dataloader, y_true, labels, templates, devi
     # Evaluate
     results_df = evaluate_predictions(y_pred, y_true, labels)
     
+    # Save detailed results if requested
+    if save_detailed and model_name and dataset_name:
+        from benchmark_base import save_detailed_results
+        config_data = {
+            "model_name": model_name,
+            "dataset": dataset_name,
+            "method": "biomedclip_zero_shot",
+            "test_batch_size": dataloader.batch_size,
+            "templates": [pos_template, neg_template],
+            "context_length": context_length,
+            "num_images": len(y_pred),
+            "num_labels": len(labels),
+            "labels": labels,
+            "input_resolution": 224
+        }
+        save_detailed_results(y_pred, y_true, labels, model_name, dataset_name, config_data)
+        return results_df, y_pred
+    
     return results_df
 
 def benchmark_biomedclip(datasets, device):
@@ -169,10 +187,11 @@ def benchmark_biomedclip(datasets, device):
             
             # Create custom dataset with BiomedCLIP preprocessing
             dataset_configs = {
-                'chexpert_test': 'data/chexpert_test.h5',
-                'padchest_test': 'data/padchest_test.h5', 
-                'vindrcxr_test': 'data/vindrcxr_test.h5',
-                'vindrpcxr_test': 'data/vindrpcxr_test.h5'
+                'chexpert_test': '../data/chexpert_test.h5',
+                'padchest_test': '../data/padchest_test.h5', 
+                'vindrcxr_test': '../data/vindrcxr_test.h5',
+                'vindrpcxr_test': '../data/vindrpcxr_test.h5',
+                'indiana_test': '../data/indiana_test.h5'
             }
             
             img_path = dataset_configs[dataset_name]
@@ -183,8 +202,9 @@ def benchmark_biomedclip(datasets, device):
             print(f"Created BiomedCLIP dataset with {len(biomedclip_dataset)} images")
             
             # Run evaluation
-            results_df = run_biomedclip_evaluation(
-                model, dataloader, y_true, labels, templates, device, context_length=256
+            results_df, y_pred = run_biomedclip_evaluation(
+                model, dataloader, y_true, labels, templates, device, context_length=256,
+                save_detailed=True, model_name="biomedclip", dataset_name=dataset_name
             )
             
             # Save results
@@ -199,7 +219,7 @@ def benchmark_biomedclip(datasets, device):
 def main():
     parser = argparse.ArgumentParser(description="Benchmark BiomedCLIP model")
     parser.add_argument('--datasets', nargs='+', 
-                        default=['chexpert_test', 'padchest_test', 'vindrcxr_test', 'vindrpcxr_test'],
+                        default=['chexpert_test', 'padchest_test', 'vindrcxr_test', 'vindrpcxr_test', 'indiana_test'],
                         help='Datasets to evaluate on')
     parser.add_argument('--device', type=str, default='auto',
                         help='Device to run on (auto, cpu, cuda)')

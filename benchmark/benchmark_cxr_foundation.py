@@ -37,74 +37,8 @@ except ImportError:
 # Add the parent directory to Python path to import from the main codebase
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Import only what we need to avoid torch dependency issues in tensorflow env
-try:
-    from benchmark_base import evaluate_predictions, save_results, make_true_labels
-except ImportError as e:
-    print(f"Warning: Could not import from benchmark_base: {e}")
-    print("Implementing local versions of evaluation functions...")
-    
-    from sklearn.metrics import roc_auc_score
-    
-    def evaluate_predictions(y_pred, y_true, labels):
-        """Local implementation of ROC-AUC evaluation."""
-        individual_aucs = []
-        results = []
-        
-        for i, label in enumerate(labels):
-            try:
-                if len(np.unique(y_true[:, i])) > 1:  # Check if both classes present
-                    auc = roc_auc_score(y_true[:, i], y_pred[:, i])
-                    individual_aucs.append(auc)
-                    results.append({'label': label, 'auc': auc})
-                else:
-                    print(f"Warning: Only one class present for {label}, skipping AUC calculation")
-                    results.append({'label': label, 'auc': np.nan})
-            except Exception as e:
-                print(f"Error calculating AUC for {label}: {e}")
-                results.append({'label': label, 'auc': np.nan})
-        
-        mean_auc = np.mean(individual_aucs) if individual_aucs else np.nan
-        results.append({'label': 'MEAN', 'auc': mean_auc})
-        
-        return pd.DataFrame(results)
-    
-    def save_results(results_df, model_name, dataset_name):
-        """Local implementation of results saving."""
-        results_dir = os.path.join(os.path.dirname(__file__), "results")
-        os.makedirs(results_dir, exist_ok=True)
-        filename = os.path.join(results_dir, f"{model_name}_{dataset_name}_results.csv")
-        results_df.to_csv(filename, index=False)
-        print(f"✅ Results saved to {filename}")
-        
-        # Print summary
-        mean_auc = results_df[results_df['label'] == 'MEAN']['auc'].iloc[0]
-        print(f"📊 {model_name} on {dataset_name}: Mean AUC = {mean_auc:.4f}")
-        
-        return filename
-    
-    def make_true_labels(label_path, labels):
-        """Local implementation of ground truth label creation."""
-        df = pd.read_csv(label_path)
-        
-        # Convert labels to numpy array
-        y_true = []
-        actual_labels = []
-        
-        for label in labels:
-            if label in df.columns:
-                y_true.append(df[label].values)
-                actual_labels.append(label)
-            else:
-                print(f"Warning: Label {label} not found in {label_path}")
-        
-        if not y_true:
-            raise ValueError(f"No valid labels found in {label_path}")
-        
-        y_true = np.column_stack(y_true)
-        print(f"Ground truth shape: {y_true.shape}")
-        
-        return y_true, actual_labels
+# Import from benchmark_base to use proper saving functions like other models
+from benchmark_base import evaluate_predictions, save_results, save_detailed_results, make_true_labels
 
 def png_to_tfexample(image_array: np.ndarray):
     """Creates a tf.train.Example from a NumPy array (from official notebook)."""
@@ -345,20 +279,24 @@ def setup_cxr_foundation_data(dataset_name):
     # Dataset configurations (paths only)
     dataset_configs = {
         'chexpert_test': {
-            'img_path': 'data/chexpert_test.h5',
-            'label_path': 'data/chexpert_test.csv',
+            'img_path': '../data/chexpert_test.h5',
+            'label_path': '../data/chexpert_test.csv',
         },
         'padchest_test': {
-            'img_path': 'data/padchest_test.h5',
-            'label_path': 'data/padchest_test.csv',
+            'img_path': '../data/padchest_test.h5',
+            'label_path': '../data/padchest_test.csv',
         },
         'vindrcxr_test': {
-            'img_path': 'data/vindrcxr_test.h5',
-            'label_path': 'data/vindrcxr_test.csv',
+            'img_path': '../data/vindrcxr_test.h5',
+            'label_path': '../data/vindrcxr_test.csv',
         },
         'vindrpcxr_test': {
-            'img_path': 'data/vindrpcxr_test.h5',
-            'label_path': 'data/vindrpcxr_test.csv',
+            'img_path': '../data/vindrpcxr_test.h5',
+            'label_path': '../data/vindrpcxr_test.csv',
+        },
+        'indiana_test': {
+            'img_path': '../data/indiana_test.h5',
+            'label_path': '../data/indiana_test.csv',
         }
     }
     
@@ -377,7 +315,7 @@ def setup_cxr_foundation_data(dataset_name):
     df = pd.read_csv(config['label_path'], nrows=0)  # Read only header
     
     # Get all columns except non-label columns
-    exclude_columns = {'Study', 'Path', 'image_id', 'ImageID', 'name', 'is_test'}
+    exclude_columns = {'Study', 'Path', 'image_id', 'ImageID', 'name', 'is_test', 'uid', 'filename', 'projection', 'MeSH', 'Problems', 'image', 'indication', 'comparison', 'findings', 'impression'}
     all_columns = set(df.columns)
     label_columns = all_columns - exclude_columns
     labels = sorted(list(label_columns))  # Sort for consistency
@@ -404,7 +342,7 @@ def setup_cxr_foundation_data(dataset_name):
     
     return config, y_true, actual_labels
 
-def run_cxr_foundation_evaluation(model, dataset_name):
+def run_cxr_foundation_evaluation(model, dataset_name, save_detailed=False, model_name=None):
     """Run zero-shot evaluation using CXR-Foundation."""
     
     config, y_true, labels = setup_cxr_foundation_data(dataset_name)
@@ -473,6 +411,20 @@ def run_cxr_foundation_evaluation(model, dataset_name):
     # Evaluate
     results_df = evaluate_predictions(y_pred, y_true, labels)
     
+    # Save detailed results if requested
+    if save_detailed and model_name:
+        config_data = {
+            "model_name": model_name,
+            "dataset": dataset_name,
+            "method": "cxr_foundation_zero_shot",
+            "num_images": len(y_pred),
+            "num_labels": len(labels),
+            "labels": labels,
+            "input_resolution": 448
+        }
+        save_detailed_results(y_pred, y_true, labels, model_name, dataset_name, config_data)
+        return results_df, y_pred
+    
     return results_df
 
 def check_dependencies():
@@ -521,7 +473,9 @@ def benchmark_cxr_foundation(datasets):
         
         try:
             # Run evaluation
-            results_df = run_cxr_foundation_evaluation(model, dataset_name)
+            results_df, y_pred = run_cxr_foundation_evaluation(
+                model, dataset_name, save_detailed=True, model_name="cxr_foundation"
+            )
             
             # Save results
             save_results(results_df, "cxr_foundation", dataset_name)
@@ -535,7 +489,7 @@ def benchmark_cxr_foundation(datasets):
 def main():
     parser = argparse.ArgumentParser(description="Benchmark CXR-Foundation model")
     parser.add_argument('--datasets', nargs='+', 
-                        default=['chexpert_test', 'padchest_test', 'vindrcxr_test', 'vindrpcxr_test'],
+                        default=['chexpert_test', 'padchest_test', 'vindrcxr_test', 'indiana_test'],
                         help='Datasets to evaluate on')
     parser.add_argument('--device', type=str, default='auto',
                         help='Device (not used for TensorFlow models)')

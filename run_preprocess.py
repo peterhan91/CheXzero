@@ -12,7 +12,9 @@ def parse_args():
     parser.add_argument('--dataset_type', type=str, default='mimic', choices=['mimic', 'chexpert-test', 
                                                                               'chexpert-plus', 'rexgradient', 
                                                                               'chexpert-valid', 'padchest-test',
-                                                                              'vindrcxr-test', 'vindrpcxr-test'], 
+                                                                              'vindrcxr-test', 'vindrpcxr-test',
+                                                                              'indiana-test', 'vindrcxr-train',
+                                                                              'brax'], 
                                                                               help="Type of dataset to pre-process")
     parser.add_argument('--mimic_impressions_path', default='data/mimic_impressions.csv', help="Directory to save extracted impressions from radiology reports.")
     parser.add_argument('--chest_x_ray_path', default='/deep/group/data/mimic-cxr/mimic-cxr-jpg/2.0.0/files', help="Directory where chest x-ray image data is stored. This should point to the files folder from the MIMIC chest x-ray dataset.")
@@ -90,6 +92,14 @@ if __name__ == "__main__":
        
         img_to_hdf5(cxr_paths, args.cxr_out_path, resolution=args.resolution)     
 
+    elif args.dataset_type == "vindrcxr-train":
+        df_vindrcxr = pd.read_csv("data/vindrcxr_train.csv")
+        cxr_paths = df_vindrcxr['image_id'].tolist()
+        cxr_paths = [os.path.join("/home/than/Datasets/CXR_VQA/OD/physionet.org/files/vindr-cxr/1.0.0/train_png/", p + '.png') for p in cxr_paths]
+        assert(len(cxr_paths) == 15000)
+
+        img_to_hdf5(cxr_paths, args.cxr_out_path, resolution=args.resolution)
+
     elif args.dataset_type == "vindrcxr-test":
         df_vindrcxr = pd.read_csv("data/vindrcxr_test.csv")
         cxr_paths = df_vindrcxr['image_id'].tolist()
@@ -106,4 +116,18 @@ if __name__ == "__main__":
 
         img_to_hdf5(cxr_paths, args.cxr_out_path, resolution=args.resolution)
 
+    elif args.dataset_type == "indiana-test":
+        df_indiana = pd.read_csv("data/indiana_test.csv")
+        cxr_paths = df_indiana['filename'].tolist()
+        cxr_paths = [os.path.join("/home/than/Datasets/IU_XRay/images/images_normalized/", p) for p in cxr_paths]
+        assert(len(cxr_paths) == 7466)
 
+        img_to_hdf5(cxr_paths, args.cxr_out_path, resolution=args.resolution)
+
+    elif args.dataset_type == "brax":
+        df_brax = pd.read_csv("data/brax.csv")
+        cxr_paths = df_brax['PngPath'].tolist()
+        cxr_paths = [os.path.join("/home/than/Datasets/BRAX", p) for p in cxr_paths]
+        assert(len(cxr_paths) == 40922) 
+
+        img_to_hdf5(cxr_paths, args.cxr_out_path, resolution=args.resolution)   

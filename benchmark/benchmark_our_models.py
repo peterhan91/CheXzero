@@ -102,13 +102,14 @@ def benchmark_model_at_resolution(model, model_name, datasets, device, input_res
                 input_resolution=input_resolution
             )
             
-            # Run evaluation
-            results_df = run_zero_shot_evaluation(
-                model, dataloader, y_true, labels, templates, device, context_length=77
+            # Run evaluation with detailed results
+            model_name_with_res = f"{model_name}_{resolution_suffix}"
+            results_df, y_pred = run_zero_shot_evaluation(
+                model, dataloader, y_true, labels, templates, device, context_length=77,
+                save_detailed=True, model_name=model_name_with_res, dataset_name=dataset_name
             )
             
             # Save results with resolution suffix
-            model_name_with_res = f"{model_name}_{resolution_suffix}"
             save_results(results_df, model_name_with_res, dataset_name)
             
         except Exception as e:
@@ -161,7 +162,7 @@ def main():
     parser.add_argument('--checkpoints_dir', type=str, default='checkpoints',
                         help='Directory containing model checkpoints')
     parser.add_argument('--datasets', nargs='+', 
-                        default=['chexpert_test', 'padchest_test', 'vindrcxr_test', 'vindrpcxr_test'],
+                        default=['chexpert_test', 'padchest_test', 'vindrcxr_test', 'vindrpcxr_test', 'indiana_test'],
                         help='Datasets to evaluate on')
     parser.add_argument('--models', nargs='+', default=None,
                         help='Specific models to evaluate (default: all found models)')
