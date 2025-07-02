@@ -48,7 +48,13 @@ def process_csv_metrics(df, metric_name):
     labels = ['Cardiomegaly', 'Atelectasis', 'Consolidation', 'Edema', 'Pleural Effusion']
     methods = ['Standard', 'Improved']  # CSV uses 'Standard' and 'Improved' instead of 'Standard CBM'
     
-    results = {f'{method} CBM': {dataset: {label: [] for label in labels} for dataset in datasets} for method in methods}
+    # Map CSV method names to display names
+    method_mapping = {
+        'Standard': 'Standard CBM',
+        'Improved': 'LLM Embedding CBM'
+    }
+    
+    results = {method_mapping[method]: {dataset: {label: [] for label in labels} for dataset in datasets} for method in methods}
     
     # Filter out ZeroShot results and process Standard/Improved
     for method in methods:
@@ -62,9 +68,9 @@ def process_csv_metrics(df, metric_name):
                 
                 if len(label_data) > 0:
                     scores = label_data[f'{metric_name}_Score'].values
-                    results[f'{method} CBM'][dataset][label] = scores.tolist()
+                    results[method_mapping[method]][dataset][label] = scores.tolist()
                 else:
-                    results[f'{method} CBM'][dataset][label] = []
+                    results[method_mapping[method]][dataset][label] = []
     
     return results
 
@@ -82,7 +88,7 @@ def compute_auc_scores_per_label(y_true, y_pred, labels):
 def collect_auc_results_per_label(zeroshot_data, seed_data):
     """Collect AUC results for all methods, datasets, and labels"""
     datasets = ['chexpert', 'vindrcxr', 'padchest', 'indiana']
-    methods = ['Standard CBM', 'Improved CBM']  # Only these two methods
+    methods = ['Standard CBM', 'LLM Embedding CBM']  # Only these two methods
     
     # Get labels from any dataset
     sample_dataset = list(zeroshot_data.keys())[0]
@@ -91,7 +97,7 @@ def collect_auc_results_per_label(zeroshot_data, seed_data):
     # Initialize results structure: {method: {dataset: {label: [aucs]}}}
     results = {method: {dataset: {label: [] for label in labels} for dataset in datasets} for method in methods}
     
-    # Standard and Improved CBM results (across seeds)
+    # Standard and LLM Embedding CBM results (across seeds)
     for seed, data in seed_data.items():
         for dataset in datasets:
             # Standard CBM
@@ -102,13 +108,13 @@ def collect_auc_results_per_label(zeroshot_data, seed_data):
                 for label in labels:
                     results['Standard CBM'][dataset][label].append(aucs[label])
             
-            # Improved CBM
+            # LLM Embedding CBM
             if dataset in data['improved']:
                 y_true = data['improved'][dataset]['y_true']
                 y_pred = data['improved'][dataset]['y_pred']
                 aucs = compute_auc_scores_per_label(y_true, y_pred, labels)
                 for label in labels:
-                    results['Improved CBM'][dataset][label].append(aucs[label])
+                    results['LLM Embedding CBM'][dataset][label].append(aucs[label])
     
     return results, labels
 
@@ -116,7 +122,7 @@ def create_single_metric_plot(ax, results, labels, metric_name, y_label, show_xa
     """Create a single metric plot (AUROC, F1, or MCC)"""
     datasets = ['chexpert', 'vindrcxr', 'padchest', 'indiana']
     dataset_labels = ['CheXpert', 'VinDr-CXR', 'PadChest', 'Indiana']
-    methods = ['Standard CBM', 'Improved CBM']
+    methods = ['Standard CBM', 'LLM Embedding CBM']
     
     # Colors for datasets and methods
     palette = sns.color_palette("Set2")
@@ -197,10 +203,10 @@ def create_comprehensive_cbm_plot(auc_results, f1_results, mcc_results, labels, 
     """Create a comprehensive plot with two vertical subplots for AUROC and MCC"""
     datasets = ['chexpert', 'vindrcxr', 'padchest', 'indiana']
     dataset_labels = ['CheXpert', 'VinDr-CXR', 'PadChest', 'Indiana']
-    methods = ['Standard CBM', 'Improved CBM']
+    methods = ['Standard CBM', 'LLM Embedding CBM']
     
     # Create figure with two vertical subplots
-    fig, axes = plt.subplots(2, 1, figsize=(18, 14))
+    fig, axes = plt.subplots(2, 1, figsize=(18, 16))
     
     # Create each subplot - show x-axis labels on both plots
     create_single_metric_plot(axes[0], auc_results, labels, 'AUROC', 'AUROC', show_xaxis=True)
@@ -227,10 +233,12 @@ def create_comprehensive_cbm_plot(auc_results, f1_results, mcc_results, labels, 
     # Create legends on the top subplot, positioned better for vertical layout
     legend1 = axes[0].legend(dataset_handles, dataset_labels, 
                            loc='upper left', 
-                           bbox_to_anchor=(0, 1), fontsize=14, ncol=2)
+                           title='Test Dataset',
+                           bbox_to_anchor=(0, 1), fontsize=14, title_fontsize=16, ncol=2)
     legend2 = axes[0].legend(method_handles, methods, 
+                           title='Method',
                            loc='upper left', 
-                           bbox_to_anchor=(0.26, 1), fontsize=14, ncol=2)
+                           bbox_to_anchor=(0.26, 1), fontsize=14, title_fontsize=16, ncol=2)
     
     # Add the first legend back
     axes[0].add_artist(legend1)
@@ -248,14 +256,14 @@ def print_summary_table_per_label(results, labels):
     """Print a summary table of results for each label"""
     datasets = ['chexpert', 'vindrcxr', 'padchest', 'indiana']
     dataset_labels = ['CheXpert', 'VinDr-CXR', 'PadChest', 'Indiana']
-    methods = ['Standard CBM', 'Improved CBM']
+    methods = ['Standard CBM', 'LLM Embedding CBM']
     
     for label in labels:
         print(f"\n" + "="*70)
         print(f"CBM AUC COMPARISON - {label.upper()}")
         print("="*70)
         
-        print(f"{'Dataset':<12} {'Standard CBM':<20} {'Improved CBM':<20}")
+        print(f"{'Dataset':<12} {'Standard CBM':<20} {'LLM Embedding CBM':<20}")
         print("-" * 70)
         
         for dataset, dataset_label in zip(datasets, dataset_labels):

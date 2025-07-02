@@ -255,13 +255,13 @@ def plot_roc_curve_for_label(standard_predictions, improved_predictions, label_n
         y_true_ref = standard_predictions[0][0][:, label_idx]
         
         print(f"  Adding radiologist results...")
-        colors = ['orange', 'darkorange', 'orangered']
+        colors = ['orange', 'orange', 'orange']
         for i, (rad_name, rad_info) in enumerate(radiologist_data.items()):
             fpr_rad, tpr_rad = compute_radiologist_metrics(
                 rad_info['data'], y_true_ref, rad_label_idx, label_name)
             
             ax.scatter(fpr_rad, tpr_rad, marker=rad_info['marker'], 
-                       s=200, color=colors[i], edgecolors='black', linewidth=2,
+                       s=250, color=colors[i], edgecolors='black', linewidth=2,
                        label=rad_name, zorder=5)
     elif not radiologist_data:
         print(f"  No radiologist data available for {dataset_name}")

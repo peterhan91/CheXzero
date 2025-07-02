@@ -7,6 +7,9 @@ import os
 import sys
 import argparse
 import torch
+from torch.utils.data import Dataset, DataLoader
+import h5py
+import numpy as np
 
 # Add the parent directory to Python path to import from the main codebase
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -16,8 +19,44 @@ os.environ['TQDM_DISABLE_JUPYTER'] = '1'
 import tqdm
 tqdm.tqdm_notebook = tqdm.tqdm  # Patch to use standard tqdm instead of notebook tqdm
 
-from benchmark_base import setup_test_data, save_results, evaluate_predictions, save_detailed_results
+from benchmark_base import setup_test_data, save_results, evaluate_predictions, save_detailed_results, make_true_labels
 from tqdm import tqdm
+
+class OpenAICLIPDataset(Dataset):
+    """Dataset class for OpenAI CLIP with built-in preprocessing"""
+    def __init__(self, img_path, preprocess_fn):
+        self.img_path = img_path
+        self.preprocess = preprocess_fn
+        self.h5_file = h5py.File(img_path, 'r')
+        self.length = len(self.h5_file['cxr'])
+        
+    def __len__(self):
+        return self.length
+    
+    def __getitem__(self, idx):
+        # Load image from H5 file
+        img_data = self.h5_file['cxr'][idx]  # shape: (320, 320) or similar
+        
+        # Convert to 3-channel format
+        img_data = np.expand_dims(img_data, axis=0)  # (1, H, W)
+        img_data = np.repeat(img_data, 3, axis=0)    # (3, H, W)
+        img_tensor = torch.from_numpy(img_data).float()
+        
+        # Convert tensor to PIL for CLIP preprocessing, then back to tensor
+        from PIL import Image
+        import torchvision.transforms.functional as F
+        
+        # Convert (3, H, W) tensor to PIL Image
+        img_pil = F.to_pil_image(img_tensor)
+        
+        # Apply OpenAI CLIP's built-in preprocessing
+        processed_img = self.preprocess(img_pil)
+        
+        return {'img': processed_img}
+    
+    def __del__(self):
+        if hasattr(self, 'h5_file'):
+            self.h5_file.close()
 
 def load_openai_clip_model(device):
     """Load OpenAI CLIP model using open_clip library for better compatibility."""
@@ -137,12 +176,28 @@ def benchmark_openai_clip(datasets, device):
         print(f"\n--- Testing on {dataset_name} ---")
         
         try:
-            # Setup test data using OpenAI CLIP standard resolution (224x224)
-            dataloader, y_true, labels, templates = setup_test_data(
+            # Get basic dataset configuration (labels and templates only)
+            _, y_true, labels, templates = setup_test_data(
                 dataset_name, 
-                batch_size=32,  # Smaller batch size for external models
-                input_resolution=224  # OpenAI CLIP uses 224x224
+                batch_size=32,  # This won't be used since we create our own dataloader
+                input_resolution=224  # This won't be used either
             )
+            
+            # Create custom dataset with OpenAI CLIP preprocessing
+            dataset_configs = {
+                'chexpert_test': '../data/chexpert_test.h5',
+                'padchest_test': '../data/padchest_test.h5', 
+                'vindrcxr_test': '../data/vindrcxr_test.h5',
+                'vindrpcxr_test': '../data/vindrpcxr_test.h5',
+                'indiana_test': '../data/indiana_test.h5'
+            }
+            
+            img_path = dataset_configs[dataset_name]
+            openai_clip_dataset = OpenAICLIPDataset(img_path, preprocess)
+            dataloader = DataLoader(openai_clip_dataset, batch_size=32, shuffle=False, 
+                                  num_workers=2, pin_memory=True)
+            
+            print(f"Created OpenAI CLIP dataset with {len(openai_clip_dataset)} images")
             
             # Run evaluation
             results_df, y_pred = run_openai_clip_evaluation(
@@ -175,7 +230,7 @@ def benchmark_openai_clip(datasets, device):
 def main():
     parser = argparse.ArgumentParser(description="Benchmark OpenAI CLIP model")
     parser.add_argument('--datasets', nargs='+', 
-                        default=['chexpert_test', 'padchest_test', 'vindrcxr_test', 'vindrpcxr_test', 'indiana_test'],
+                        default=['chexpert_test', 'padchest_test', 'vindrcxr_test', 'indiana_test'],
                         help='Datasets to evaluate on')
     parser.add_argument('--device', type=str, default='auto',
                         help='Device to run on (auto, cpu, cuda)')

@@ -68,7 +68,7 @@ def load_clip(model_path, pretrained=False, context_length=77,
     FUNCTION: load_clip
     ---------------------------------
     """
-    device = torch.device("cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if pretrained is False: 
         # use new model params
         params = {
@@ -90,10 +90,11 @@ def load_clip(model_path, pretrained=False, context_length=77,
         if use_dinov2:
             # Load DinoV2 backbone from official Facebook Research implementation
             dinov2_backbone = torch.hub.load('facebookresearch/dinov2', dinov2_model_name, pretrained=True)
+            dinov2_backbone = dinov2_backbone.to(device)  # Move to correct device
             
             # Get feature dimension using a dummy forward pass
             with torch.no_grad():
-                dummy_input = torch.randn(1, 3, 224, 224)
+                dummy_input = torch.randn(1, 3, 224, 224).to(device)  # Move dummy input to device
                 features = dinov2_backbone(dummy_input)  # forward() returns CLS token directly
                 backbone_dim = features.shape[-1]
             

@@ -15,6 +15,8 @@ from sklearn.metrics import roc_auc_score
 import h5py
 import pickle
 import sys
+import random
+import shutil
 
 # Import functions from existing files
 # from zero_shot import load_clip
@@ -182,20 +184,59 @@ def extract_concept_features(model, concepts, concept_embeddings, dataset_type, 
     
     # Encode concepts with CLIP first (we'll need this for both cases)
     print("Encoding concepts...")
-    import clip
-    concept_batch_size = 4096
-    all_concept_features = []
     
-    for i in tqdm(range(0, len(concepts), concept_batch_size), desc="Encoding concepts"):
-        batch_concepts = concepts[i:i+concept_batch_size]
-        concept_tokens = clip.tokenize(batch_concepts, context_length=77).to(device)
-        concept_features = model.encode_text(concept_tokens)
-        concept_features /= concept_features.norm(dim=-1, keepdim=True)
-        all_concept_features.append(concept_features.cpu())
-        torch.cuda.empty_cache()
+    # Check for cached concept features
+    concept_cache_file = "cache/clip_concept_features.pkl"
+    if os.path.exists(concept_cache_file):
+        print("Loading cached CLIP concept features...")
+        try:
+            with open(concept_cache_file, 'rb') as f:
+                cached_concept_data = pickle.load(f)
+            # Verify cache matches current concepts
+            if cached_concept_data['concepts'] == concepts:
+                concept_features = cached_concept_data['concept_features'].to(device)
+                print(f"✓ Loaded cached concept features: {concept_features.shape}")
+            else:
+                print("Concept list changed, re-encoding...")
+                concept_features = None
+        except Exception as e:
+            print(f"Cache loading failed: {e}, re-encoding...")
+            concept_features = None
+    else:
+        concept_features = None
     
-    concept_features = torch.cat(all_concept_features).to(device)
-    print(f"Concept features shape: {concept_features.shape}")
+    # Encode concepts if not cached or cache invalid
+    if concept_features is None:
+        print("Encoding concepts with CLIP...")
+        import clip
+        concept_batch_size = 4096
+        all_concept_features = []
+        
+        for i in tqdm(range(0, len(concepts), concept_batch_size), desc="Encoding concepts"):
+            batch_concepts = concepts[i:i+concept_batch_size]
+            concept_tokens = clip.tokenize(batch_concepts, context_length=77).to(device)
+            concept_features_batch = model.encode_text(concept_tokens)
+            concept_features_batch /= concept_features_batch.norm(dim=-1, keepdim=True)
+            all_concept_features.append(concept_features_batch.cpu())
+            torch.cuda.empty_cache()
+        
+        concept_features = torch.cat(all_concept_features)
+        print(f"Concept features shape: {concept_features.shape}")
+        
+        # Cache the encoded concept features
+        os.makedirs("cache", exist_ok=True)
+        cache_data = {
+            'concepts': concepts,
+            'concept_features': concept_features
+        }
+        try:
+            with open(concept_cache_file, 'wb') as f:
+                pickle.dump(cache_data, f)
+            print(f"✓ Cached CLIP concept features to: {concept_cache_file}")
+        except Exception as e:
+            print(f"Warning: Failed to cache concept features: {e}")
+        
+        concept_features = concept_features.to(device)
     
     if is_preencoded:
         # Load pre-encoded CLIP features (MIMIC train)
@@ -331,17 +372,25 @@ def evaluate_epoch(model, data_loader):
     mean_auc = np.mean(aucs)
     return mean_auc, y_true, y_pred, aucs
 
-def run_concept_based_linear_probing():
+def set_random_seed(seed):
+    """Set random seed for reproducibility"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+def run_concept_based_linear_probing(seed=42):
     """Main function to run concept-based linear probing"""
-    print("=== Concept-Based Linear Probing ===")
+    print(f"=== Concept-Based Linear Probing (Seed: {seed}) ===")
+    
+    # Set random seed
+    set_random_seed(seed)
     
     # Load CLIP model
     print("Loading CLIP model...")
-    # model = load_clip(
-    #     model_path="/home/than/DeepLearning/CheXzero/checkpoints/pt-imp-v3.0/checkpoint_3800.pt",
-    #     pretrained=False,
-    #     context_length=77
-    # ).to(device).eval()
     model = load_clip(
         model_path="/home/than/DeepLearning/cxr_concept/CheXzero/checkpoints/dinov2-multi-v1.0_vitb/best_model.pt",
         pretrained=False,
@@ -431,7 +480,8 @@ def run_concept_based_linear_probing():
         # Validate
         val_auc, _, _, val_aucs = evaluate_epoch(lr_model, val_loader)
         
-        print(f"Epoch {epoch+1:3d}: Train Loss = {train_loss:.4f}, Val AUC = {val_auc:.4f}")
+        if epoch % 20 == 0 or epoch < 10:  # Reduce printing
+            print(f"Epoch {epoch+1:3d}: Train Loss = {train_loss:.4f}, Val AUC = {val_auc:.4f}")
         
         # Early stopping
         if val_auc > best_val_auc:
@@ -447,20 +497,16 @@ def run_concept_based_linear_probing():
     
     # Load best model and evaluate on test set
     lr_model.load_state_dict(best_model_state)
-    print(f"\nBest validation AUC: {best_val_auc:.4f}")
+    print(f"Best validation AUC: {best_val_auc:.4f}")
     
-    # Final evaluation
-    print("\n=== Final Evaluation ===")
-    test_auc, y_true, y_pred, test_aucs = evaluate_epoch(lr_model, test_loader)
-    
+    # Final evaluation on validation and test sets
+    val_auc, y_true_val, y_pred_val, val_aucs = evaluate_epoch(lr_model, val_loader)
+    test_auc, y_true_test, y_pred_test, test_aucs = evaluate_epoch(lr_model, test_loader)
     print(f"Test AUC: {test_auc:.4f}")
-    print("\nPer-label AUCs:")
-    for i, (label, auc) in enumerate(zip(all_labels, test_aucs)):
-        print(f"  {label}: {auc:.4f}")
     
-    # Save results
+    # Return results for aggregation (including predictions and model)
     results = {
-        'method': 'concept_based_linear_probing',
+        'seed': seed,
         'test_auc': test_auc,
         'val_auc': best_val_auc,
         'labels': all_labels,
@@ -469,27 +515,262 @@ def run_concept_based_linear_probing():
         'feature_dim': input_dim,
         'train_samples': len(train_features),
         'val_samples': len(val_features), 
-        'test_samples': len(test_features)
+        'test_samples': len(test_features),
+        # Add predictions and ground truth
+        'predictions': {
+            'val': {
+                'y_true': y_true_val,
+                'y_pred': y_pred_val
+            },
+            'test': {
+                'y_true': y_true_test,
+                'y_pred': y_pred_test
+            }
+        },
+        # Add trained model state dict
+        'trained_model': best_model_state,
+        'model_config': {
+            'input_dim': input_dim,
+            'output_dim': output_dim,
+            'architecture': 'LogisticRegression',
+            'num_concepts': len(concepts)
+        }
     }
-    
-    # Create results directory
-    os.makedirs('results/concept_based_linear_probing_torch', exist_ok=True)
-    
-    # Save results
-    with open('results/concept_based_linear_probing_torch/results.json', 'w') as f:
-        json.dump(results, f, indent=2)
-    
-    # Save predictions
-    np.save('results/concept_based_linear_probing_torch/y_true.npy', y_true)
-    np.save('results/concept_based_linear_probing_torch/y_pred.npy', y_pred)
-    
-    # Save model
-    torch.save(lr_model.state_dict(), 'results/concept_based_linear_probing_torch/model.pth')
-    
-    print(f"\nResults saved to results/concept_based_linear_probing_torch/")
     
     return results
 
+def run_multiple_seeds():
+    """Run experiment with 20 different random seeds"""
+    print("=== Running 20 Experiments with Different Seeds ===")
+    
+    # Clean and create results directory
+    results_dir = 'results/concept_based_linear_probing_torch'
+    if os.path.exists(results_dir):
+        shutil.rmtree(results_dir)
+    os.makedirs(results_dir, exist_ok=True)
+    
+    # Create subdirectories for different types of outputs
+    predictions_dir = os.path.join(results_dir, 'predictions')
+    models_dir = os.path.join(results_dir, 'models')
+    os.makedirs(predictions_dir, exist_ok=True)
+    os.makedirs(models_dir, exist_ok=True)
+    
+    # Run experiments with different seeds
+    seeds = list(range(42, 62))  # Seeds 42-61
+    all_results = []
+    
+    for i, seed in enumerate(seeds):
+        print(f"\n{'='*50}")
+        print(f"EXPERIMENT {i+1}/20 (Seed: {seed})")
+        print(f"{'='*50}")
+        
+        try:
+            results = run_concept_based_linear_probing(seed)
+            all_results.append(results)
+            
+            # Save individual run results (metrics only)
+            results_clean = results.copy()
+            if 'predictions' in results_clean:
+                del results_clean['predictions']
+            if 'trained_model' in results_clean:
+                del results_clean['trained_model']
+                
+            with open(f'{results_dir}/results_seed_{seed}.json', 'w') as f:
+                json.dump(results_clean, f, indent=2)
+            
+            # Save predictions and ground truth separately
+            if 'predictions' in results:
+                predictions_data = {
+                    'seed': seed,
+                    'method': 'concept_based_linear_probing',
+                    'labels': results['labels'],
+                    'num_concepts': results['num_concepts'],
+                    'val': {
+                        'y_true': results['predictions']['val']['y_true'].tolist(),
+                        'y_pred': results['predictions']['val']['y_pred'].tolist()
+                    },
+                    'test': {
+                        'y_true': results['predictions']['test']['y_true'].tolist(),
+                        'y_pred': results['predictions']['test']['y_pred'].tolist()
+                    }
+                }
+                
+                with open(f'{predictions_dir}/seed_{seed}_predictions.pkl', 'wb') as f:
+                    pickle.dump(predictions_data, f)
+            
+            # Save trained model checkpoint
+            if 'trained_model' in results:
+                model_data = {
+                    'seed': seed,
+                    'method': 'concept_based_linear_probing',
+                    'state_dict': results['trained_model'],
+                    'model_config': results['model_config'],
+                    'labels': results['labels'],
+                    'num_concepts': results['num_concepts'],
+                    'test_auc': results['test_auc'],
+                    'val_auc': results['val_auc']
+                }
+                
+                torch.save(model_data, f'{models_dir}/seed_{seed}_model.pth')
+                
+        except Exception as e:
+            print(f"Error in seed {seed}: {e}")
+            continue
+    
+    # Aggregate results
+    if all_results:
+        test_aucs = [r['test_auc'] for r in all_results]
+        val_aucs = [r['val_auc'] for r in all_results]
+        
+        # Per-label aggregation
+        all_labels = all_results[0]['labels']
+        per_label_stats = {}
+        for label in all_labels:
+            label_aucs = [r['per_label_aucs'][label] for r in all_results]
+            per_label_stats[label] = {
+                'mean': np.mean(label_aucs),
+                'std': np.std(label_aucs),
+                'aucs': label_aucs
+            }
+        
+        # Clean individual results for JSON serialization
+        individual_results_clean = []
+        for result in all_results:
+            result_clean = result.copy()
+            if 'predictions' in result_clean:
+                del result_clean['predictions']
+            if 'trained_model' in result_clean:
+                del result_clean['trained_model']
+            individual_results_clean.append(result_clean)
+        
+        aggregated_results = {
+            'method': 'concept_based_linear_probing_20_seeds',
+            'num_runs': len(all_results),
+            'seeds': [r['seed'] for r in all_results],
+            'num_concepts': all_results[0]['num_concepts'],
+            'test_auc': {
+                'mean': np.mean(test_aucs),
+                'std': np.std(test_aucs),
+                'all_aucs': test_aucs
+            },
+            'val_auc': {
+                'mean': np.mean(val_aucs),
+                'std': np.std(val_aucs),
+                'all_aucs': val_aucs
+            },
+            'per_label_stats': per_label_stats,
+            'individual_results': individual_results_clean
+        }
+        
+        # Save aggregated results
+        with open(f'{results_dir}/aggregated_results.json', 'w') as f:
+            json.dump(aggregated_results, f, indent=2)
+        
+        # Print summary
+        print(f"\n{'='*60}")
+        print("FINAL RESULTS SUMMARY")
+        print(f"{'='*60}")
+        print(f"Test AUC: {np.mean(test_aucs):.4f} ± {np.std(test_aucs):.4f}")
+        print(f"Val AUC:  {np.mean(val_aucs):.4f} ± {np.std(val_aucs):.4f}")
+        print(f"Successful runs: {len(all_results)}/20")
+        print(f"Results saved to: {results_dir}/")
+        print(f"Predictions saved to: {predictions_dir}/")
+        print(f"Model checkpoints saved to: {models_dir}/")
+        
+        return aggregated_results
+    else:
+        print("No successful runs!")
+        return None
+
+def load_concept_seed_predictions(seed):
+    """Load predictions for a specific seed"""
+    predictions_dir = 'results/concept_based_linear_probing_torch/predictions'
+    predictions_file = f'{predictions_dir}/seed_{seed}_predictions.pkl'
+    
+    if not os.path.exists(predictions_file):
+        raise FileNotFoundError(f"Predictions file not found: {predictions_file}")
+    
+    with open(predictions_file, 'rb') as f:
+        predictions_data = pickle.load(f)
+    
+    return predictions_data
+
+def load_concept_seed_model(seed):
+    """Load trained model for a specific seed"""
+    models_dir = 'results/concept_based_linear_probing_torch/models'
+    model_file = f'{models_dir}/seed_{seed}_model.pth'
+    
+    if not os.path.exists(model_file):
+        raise FileNotFoundError(f"Model file not found: {model_file}")
+    
+    model_data = torch.load(model_file, map_location='cpu')
+    
+    # Create model instance
+    config = model_data['model_config']
+    model = LogisticRegressionModel(config['input_dim'], config['output_dim'])
+    model.load_state_dict(model_data['state_dict'])
+    
+    return model, model_data
+
+def load_all_concept_predictions():
+    """Load all predictions across all seeds"""
+    predictions_dir = 'results/concept_based_linear_probing_torch/predictions'
+    
+    if not os.path.exists(predictions_dir):
+        raise FileNotFoundError(f"Predictions directory not found: {predictions_dir}")
+    
+    all_predictions = {}
+    prediction_files = [f for f in os.listdir(predictions_dir) if f.startswith('seed_') and f.endswith('_predictions.pkl')]
+    
+    for pred_file in prediction_files:
+        seed = int(pred_file.split('_')[1])
+        with open(os.path.join(predictions_dir, pred_file), 'rb') as f:
+            predictions_data = pickle.load(f)
+        all_predictions[seed] = predictions_data
+    
+    return all_predictions
+
+def get_concept_results_summary():
+    """Get summary of available predictions and models"""
+    results_dir = 'results/concept_based_linear_probing_torch'
+    predictions_dir = os.path.join(results_dir, 'predictions')
+    models_dir = os.path.join(results_dir, 'models')
+    
+    summary = {
+        'method': 'concept_based_linear_probing',
+        'results_dir': results_dir,
+        'predictions_available': [],
+        'models_available': [],
+        'total_seeds': 0
+    }
+    
+    # Check predictions
+    if os.path.exists(predictions_dir):
+        pred_files = [f for f in os.listdir(predictions_dir) if f.startswith('seed_') and f.endswith('_predictions.pkl')]
+        summary['predictions_available'] = [int(f.split('_')[1]) for f in pred_files]
+    
+    # Check models
+    if os.path.exists(models_dir):
+        model_files = [f for f in os.listdir(models_dir) if f.startswith('seed_') and f.endswith('_model.pth')]
+        summary['models_available'] = [int(f.split('_')[1]) for f in model_files]
+    
+    # Total seeds that have both predictions and models
+    available_seeds = set(summary['predictions_available']) & set(summary['models_available'])
+    summary['total_seeds'] = len(available_seeds)
+    summary['complete_seeds'] = sorted(list(available_seeds))
+    
+    return summary
+
 if __name__ == "__main__":
-    results = run_concept_based_linear_probing()
-    print("=== Experiment Complete ===") 
+    results = run_multiple_seeds()
+    print("\n=== All Concept-Based Experiments Complete ===")
+    print("📁 Saved for each experiment:")
+    print("   • JSON results with metrics and statistics")
+    print("   • Pickle files with predictions (y_pred) and ground truth (y_true)")
+    print("   • PyTorch model checkpoints (.pth) with trained weights")
+    print("   • Aggregated results across all 20 seeds")
+    print("🔧 Use utility functions to load data:")
+    print("   • load_concept_seed_predictions(seed)")
+    print("   • load_concept_seed_model(seed)")
+    print("   • load_all_concept_predictions()")
+    print("   • get_concept_results_summary()") 
