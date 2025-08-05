@@ -150,7 +150,7 @@ def load_linear_probing_weights_all_seeds(results_dir, concepts, concept_embeddi
     return avg_concept_weights, std_concept_weights, all_concept_weights, labels
 
 def plot_concept_importance(concept_weights, std_weights, all_weights, concepts, labels, output_dir):
-    """Create bar plot with top 24 positive concepts for each label, with error bars and individual points"""
+    """Create bar plot with top 10 positive concepts for each label, with error bars and individual points"""
     print(f"Creating concept importance plots...")
     
     # Set up plotting style
@@ -184,8 +184,8 @@ def plot_concept_importance(concept_weights, std_weights, all_weights, concepts,
         df_positive = df[df['weight'] > 0].copy()
         df_positive = df_positive.sort_values('weight', ascending=False)
         
-        # Take top 24 positive concepts
-        df_pos_top24 = df_positive.head(24)
+        # Take top 10 positive concepts
+        df_pos_top10 = df_positive.head(10)
         
         # Prepare data for plotting (top to bottom: highest to lowest)
         combined_concepts = []
@@ -195,7 +195,7 @@ def plot_concept_importance(concept_weights, std_weights, all_weights, concepts,
         combined_indices = []
         
         # Add positive concepts (top to bottom: highest to lowest)
-        for _, row in df_pos_top24.iterrows():
+        for _, row in df_pos_top10.iterrows():
             combined_concepts.append(row['concept'])
             combined_weights.append(row['weight'])
             combined_stds.append(row['std'])
@@ -203,7 +203,7 @@ def plot_concept_importance(concept_weights, std_weights, all_weights, concepts,
             combined_indices.append(row['concept_idx'])
         
         # Create figure
-        fig, ax = plt.subplots(figsize=(12, 12))  # Sized for 24 positive concepts
+        fig, ax = plt.subplots(figsize=(13, 12))  # Sized for 10 positive concepts
         
         # Use consistent salmon red color for all positive concepts
         colors = ['#CD5C5C'] * len(combined_weights)
@@ -211,7 +211,7 @@ def plot_concept_importance(concept_weights, std_weights, all_weights, concepts,
         # Create horizontal bar plot with error bars
         y_positions = range(len(combined_weights))
         bars = ax.barh(y_positions, combined_weights, xerr=combined_stds,
-                      color=colors, alpha=0.8, edgecolor='black', linewidth=0.5,
+                      color=colors, alpha=0.8, edgecolor='black', linewidth=1,
                       capsize=0, error_kw={'linewidth': 1.5, 'alpha': 0.8})
         
         # Add individual data points as open circles
@@ -224,17 +224,23 @@ def plot_concept_importance(concept_weights, std_weights, all_weights, concepts,
         
         # Set labels
         ax.set_yticks(y_positions)
-        # Clean up concept names (capitalize first letter, truncate if too long)
+        # Clean up concept names (capitalize first letter, wrap long text)
         clean_labels = []
         for concept in combined_labels:
             clean_concept = concept.strip().capitalize()
+            # Wrap long text instead of truncating
             words = clean_concept.split()
-            if len(words) > 10:
-                clean_concept = " ".join(words[:10]) + "..."
+            if len(words) > 5:  # If more than 6 words, wrap to multiple lines
+                # Split into lines of max 6 words each
+                lines = []
+                for i in range(0, len(words), 5):
+                    lines.append(" ".join(words[i:i+5]))
+                clean_concept = "\n".join(lines)
             clean_labels.append(clean_concept)
         
-        ax.set_yticklabels(clean_labels, fontsize=15)
-        ax.set_xlabel('Concept importance score', fontsize=15, fontweight='bold')
+        ax.set_yticklabels(clean_labels, fontsize=18)
+        ax.set_xticklabels(ax.get_xticklabels(), fontsize=24)
+        ax.set_xlabel('Concept importance score', fontsize=28)
         
         # Invert y-axis so positive concepts are at top
         ax.invert_yaxis()
@@ -244,10 +250,10 @@ def plot_concept_importance(concept_weights, std_weights, all_weights, concepts,
         min_value = min(all_values)
         max_value = max(all_values)
         
-        # Use the 24th concept's importance as the effective minimum for better zoom
-        min_concept_importance = min(combined_weights)  # This is the 24th concept (lowest of top 24)
+        # Use the 10th concept's importance as the effective minimum for better zoom
+        min_concept_importance = min(combined_weights)  # This is the 10th concept (lowest of top 10)
         
-        # Set range from slightly below the 24th concept to slightly above the 1st concept
+        # Set range from slightly below the 10th concept to slightly above the 1st concept
         value_range = max_value - min_concept_importance
         padding = value_range * 0.05  # Smaller padding for better zoom
         ax.set_xlim(min_concept_importance - padding, max_value + padding)
@@ -258,6 +264,9 @@ def plot_concept_importance(concept_weights, std_weights, all_weights, concepts,
         
         # Add subtle grid
         ax.grid(True, alpha=0.3, axis='x')
+        
+        # Add title with label name
+        ax.set_title(f'{target_label}', fontsize=32, pad=10)
         
         # Tight layout
         plt.tight_layout()
@@ -277,10 +286,10 @@ def plot_concept_importance(concept_weights, std_weights, all_weights, concepts,
         
         print(f"  {target_label}: {positive_count} positive concepts")
         print(f"    Positive range: {min_positive:.4f} to {max_positive:.4f}")
-        print(f"    Showing top 24 positive concepts with error bars and individual points")
-        if len(df_pos_top24) > 0:
-            print(f"    Top positive concept: {df_pos_top24.iloc[0]['concept'][:50]}...")
-            print(f"    24th positive concept: {df_pos_top24.iloc[-1]['concept'][:50]}...")
+        print(f"    Showing top 10 positive concepts with error bars and individual points")
+        if len(df_pos_top10) > 0:
+            print(f"    Top positive concept: {df_pos_top10.iloc[0]['concept'][:50]}...")
+            print(f"    10th positive concept: {df_pos_top10.iloc[-1]['concept'][:50]}...")
 
 def main():
     """Main function to run linear probing concept importance visualization"""

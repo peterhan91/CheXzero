@@ -207,14 +207,14 @@ def plot_roc_curve_for_label(standard_predictions, improved_predictions, label_n
     # Plot mean ROC curves
     if not std_is_dummy:
         ax.plot(fpr_grid_std, tpr_mean_std, color='steelblue', linewidth=3, alpha=1,
-                label=f'Standard CBM (AUC = {np.mean(auc_scores_std):.3f} ± {np.std(auc_scores_std):.3f})')
+                label=f'Standard CBM (AUC = {np.mean(auc_scores_std):.3f})')
     else:
         ax.plot(fpr_grid_std, tpr_mean_std, color='steelblue', linewidth=3, alpha=0.3,
                 label='Standard CBM (Invalid - one class only)')
     
     if not imp_is_dummy:
         ax.plot(fpr_grid_imp, tpr_mean_imp, color='indianred', linewidth=3, alpha=1,
-                label=f'LLM-based CBM (AUC = {np.mean(auc_scores_imp):.3f} ± {np.std(auc_scores_imp):.3f})')
+                label=f'CheXomni CBM (AUC = {np.mean(auc_scores_imp):.3f})')
     else:
         ax.plot(fpr_grid_imp, tpr_mean_imp, color='indianred', linewidth=3, alpha=0.3,
                 label='LLM-based CBM (Invalid - one class only)')
@@ -226,7 +226,7 @@ def plot_roc_curve_for_label(standard_predictions, improved_predictions, label_n
     
     if not imp_is_dummy:
         ax.fill_between(fpr_grid_imp, tpr_lower_imp, tpr_upper_imp,
-                       color='indianred', alpha=0.2, label='LLM-based CBM 95% CI')
+                       color='indianred', alpha=0.2, label='CheXomni CBM 95% CI')
     
     # Radiologist headers (order matters!)
     radiologist_headers = [
@@ -261,7 +261,7 @@ def plot_roc_curve_for_label(standard_predictions, improved_predictions, label_n
                 rad_info['data'], y_true_ref, rad_label_idx, label_name)
             
             ax.scatter(fpr_rad, tpr_rad, marker=rad_info['marker'], 
-                       s=250, color=colors[i], edgecolors='black', linewidth=2,
+                       s=800, color=colors[i], edgecolors='black', linewidth=2,
                        label=rad_name, zorder=5)
     elif not radiologist_data:
         print(f"  No radiologist data available for {dataset_name}")
@@ -274,17 +274,17 @@ def plot_roc_curve_for_label(standard_predictions, improved_predictions, label_n
     # Customize plot
     ax.set_xlim((0.0, 1.0))
     ax.set_ylim((0.0, 1.05))
-    ax.set_xlabel('False Positive Rate', fontsize=16, fontweight='bold')
-    ax.set_ylabel('True Positive Rate', fontsize=16, fontweight='bold')
-    ax.set_title(f'ROC Curve - {label_name} ({dataset_name.capitalize()})', 
-                fontsize=18, fontweight='bold', pad=20)
+    ax.set_xlabel('False Positive Rate', fontsize=34)
+    ax.set_ylabel('True Positive Rate', fontsize=34)
+    ax.set_title(f'{label_name}', 
+                fontsize=34, pad=10)
     
     # Larger tick labels
-    ax.tick_params(axis='both', which='major', labelsize=14)
+    ax.tick_params(axis='both', which='major', labelsize=30)
     
     # Customize legend
     ax.legend(loc='lower right', frameon=True, fancybox=True, shadow=True,
-             fontsize=12, framealpha=0.9)
+             fontsize=22, framealpha=0.9)
     
     # Grid
     ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)

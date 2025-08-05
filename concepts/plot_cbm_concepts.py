@@ -190,12 +190,12 @@ def plot_concept_importance(concept_weights, std_weights, all_weights, concepts,
         df_negative = df[df['weight'] < 0].copy()
         df_negative['abs_weight'] = df_negative['weight'].abs()
         
-        # Take top 8 positive and top 4 negative (by largest absolute value)
-        df_pos_top8 = df_positive.head(8)
-        df_neg_top4 = df_negative.nlargest(4, 'abs_weight')  # Select 4 with largest absolute values
+        # Take top 6 positive and top 3 negative (by largest absolute value)
+        df_pos_top6 = df_positive.head(6)
+        df_neg_top3 = df_negative.nlargest(3, 'abs_weight')  # Select 3 with largest absolute values
         
         # Now sort the selected negative concepts by smallest absolute value for plotting
-        df_neg_top4 = df_neg_top4.sort_values('abs_weight', ascending=True)  # Smallest absolute value first
+        df_neg_top3 = df_neg_top3.sort_values('abs_weight', ascending=True)  # Smallest absolute value first
         
         # Combine and order: positive concepts first (high to low), then negative (low to high)
         combined_concepts = []
@@ -205,7 +205,7 @@ def plot_concept_importance(concept_weights, std_weights, all_weights, concepts,
         combined_indices = []
         
         # Add positive concepts (top to bottom: highest to lowest)
-        for _, row in df_pos_top8.iterrows():
+        for _, row in df_pos_top6.iterrows():
             combined_concepts.append(row['concept'])
             combined_weights.append(row['weight'])
             combined_stds.append(row['std'])
@@ -213,7 +213,7 @@ def plot_concept_importance(concept_weights, std_weights, all_weights, concepts,
             combined_indices.append(row['concept_idx'])
         
         # Add negative concepts (top to bottom: most negative to least negative)
-        for _, row in df_neg_top4.iterrows():
+        for _, row in df_neg_top3.iterrows():
             combined_concepts.append(row['concept'])
             combined_weights.append(row['weight'])
             combined_stds.append(row['std'])
@@ -221,7 +221,7 @@ def plot_concept_importance(concept_weights, std_weights, all_weights, concepts,
             combined_indices.append(row['concept_idx'])
         
         # Create figure
-        fig, ax = plt.subplots(figsize=(12, 8))
+        fig, ax = plt.subplots(figsize=(12, 12))
         
         # Create color list: salmon red for positive, steel blue for negative (matching reference image)
         colors = ['#CD5C5C' if weight > 0 else '#4682B4' for weight in combined_weights]
@@ -242,28 +242,44 @@ def plot_concept_importance(concept_weights, std_weights, all_weights, concepts,
         
         # Set labels
         ax.set_yticks(y_positions)
-        # Clean up concept names (capitalize first letter, truncate if too long)
+        # Clean up concept names (capitalize first letter, break long lines)
         clean_labels = []
         for concept in combined_labels:
             clean_concept = concept.strip().capitalize()
-            words = clean_concept.split()
-            if len(words) > 10:
-                clean_concept = " ".join(words[:10]) + "..."
+            # Break long text into multiple lines
+            if len(clean_concept) > 40:
+                words = clean_concept.split()
+                lines = []
+                current_line = ""
+                for word in words:
+                    if len(current_line + " " + word) <= 40:
+                        current_line += (" " if current_line else "") + word
+                    else:
+                        if current_line:
+                            lines.append(current_line)
+                        current_line = word
+                if current_line:
+                    lines.append(current_line)
+                clean_concept = "\n".join(lines)
             clean_labels.append(clean_concept)
         
-        ax.set_yticklabels(clean_labels, fontsize=15)
-        ax.set_xlabel('Concept importance score', fontsize=15, fontweight='bold')
+        ax.set_yticklabels(clean_labels, fontsize=24)
         
-        # Add vertical line at x=0
-        ax.axvline(x=0, color='black', linewidth=1.5)
+        # Fix x-axis ticks to ensure proper coordinate system
+        ax.tick_params(axis='x', labelsize=24)
+        ax.set_xlabel('Concept importance score', fontsize=26)
         
         # Invert y-axis so positive concepts are at top
         ax.invert_yaxis()
         
-        # Set x-axis limits with some padding
+        # Set x-axis limits with some padding, centered at 0
         all_values = combined_weights + combined_stds + [x for sublist in [label_all_weights[:, idx] for idx in combined_indices] for x in sublist]
-        max_abs_weight = max(abs(min(all_values)), abs(max(all_values)))
-        ax.set_xlim(-max_abs_weight * 1.1, max_abs_weight * 1.1)
+        max_abs_weight = max([abs(val) for val in all_values])
+        x_limit = max_abs_weight * 1.1
+        ax.set_xlim(-x_limit, x_limit)
+        
+        # Add vertical line at x=0 (after setting xlim and before other plot elements)
+        ax.axvline(x=0.0, color='black', linewidth=1.5, alpha=0.8, zorder=1)
         
         # Remove top and right spines
         ax.spines['top'].set_visible(False)
@@ -271,6 +287,17 @@ def plot_concept_importance(concept_weights, std_weights, all_weights, concepts,
         
         # Add subtle grid
         ax.grid(True, alpha=0.3, axis='x')
+        
+        # Add title only for Atelectasis plots
+        if label == "Atelectasis":
+            if "Standard_CBM" in method_name:
+                method_display = "Standard CBM"
+            elif "Improved_CBM" in method_name:
+                method_display = "CheXomni CBM"
+            else:
+                method_display = method_name
+            
+            ax.set_title(method_display, fontsize=34, pad=10)
         
         # Tight layout
         plt.tight_layout()
@@ -291,11 +318,11 @@ def plot_concept_importance(concept_weights, std_weights, all_weights, concepts,
         
         print(f"  {label}: {positive_count} positive, {negative_count} negative concepts")
         print(f"    Max positive: {max_positive:.4f}, Min negative: {min_negative:.4f}")
-        print(f"    Showing top 8 positive + top 4 negative concepts with error bars and individual points")
-        if len(df_pos_top8) > 0:
-            print(f"    Top positive concept: {df_pos_top8.iloc[0]['concept'][:50]}...")
-        if len(df_neg_top4) > 0:
-            print(f"    Top negative concept: {df_neg_top4.iloc[0]['concept'][:50]}...")
+        print(f"    Showing top 6 positive + top 3 negative concepts with error bars and individual points")
+        if len(df_pos_top6) > 0:
+            print(f"    Top positive concept: {df_pos_top6.iloc[0]['concept'][:50]}...")
+        if len(df_neg_top3) > 0:
+            print(f"    Top negative concept: {df_neg_top3.iloc[0]['concept'][:50]}...")
 
 def main():
     """Main function to run concept importance visualization"""

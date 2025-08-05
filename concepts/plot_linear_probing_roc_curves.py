@@ -130,7 +130,7 @@ def plot_roc_curve_for_label(model_predictions, label_name, label_idx, output_di
     """Plot ROC curve for a single label comparing all linear probing models."""
     
     # Create figure with white background and 1:1 aspect ratio
-    fig, ax = plt.subplots(figsize=(10, 10))
+    fig, ax = plt.subplots(figsize=(8, 10))
     fig.patch.set_facecolor('white')
     ax.set_facecolor('white')
     ax.set_aspect('equal')
@@ -140,10 +140,10 @@ def plot_roc_curve_for_label(model_predictions, label_name, label_idx, output_di
     
     # Pretty model names for legend
     model_display_names = {
-        'concept_based_linear_probing': 'SFR-Embedding-Mistral',
-        'chexzero': 'CheXzero LP',
-        'biomedclip': 'BiomedCLIP LP', 
-        'openai_clip': 'OpenAI CLIP LP'
+        'concept_based_linear_probing': 'CheXomni',
+        'chexzero': 'CheXzero',
+        'biomedclip': 'BiomedCLIP', 
+        'openai_clip': 'OpenAI CLIP'
     }
     
     valid_models = 0
@@ -169,7 +169,9 @@ def plot_roc_curve_for_label(model_predictions, label_name, label_idx, output_di
         
         # Plot mean ROC curve
         ax.plot(fpr_grid, tpr_mean, color=colors[i % len(colors)], linewidth=3, alpha=1,
-                label=f'{display_name} (AUC = {np.mean(auc_scores):.3f} ± {np.std(auc_scores):.3f})')
+                label = f'{display_name} (AUC = {np.mean(auc_scores):.3f})'
+                # label=f'{display_name} (AUC = {np.mean(auc_scores):.3f} ± {np.std(auc_scores):.3f})'
+                )
         
         # Plot confidence interval as shaded area
         ax.fill_between(fpr_grid, tpr_lower, tpr_upper, 
@@ -191,17 +193,16 @@ def plot_roc_curve_for_label(model_predictions, label_name, label_idx, output_di
     # Customize plot
     ax.set_xlim((0.0, 1.0))
     ax.set_ylim((0.0, 1.05))
-    ax.set_xlabel('False Positive Rate', fontsize=16, fontweight='bold')
-    ax.set_ylabel('True Positive Rate', fontsize=16, fontweight='bold')
-    ax.set_title(f'ROC Curve - {label_name} (Linear Probing)', 
-                fontsize=18, fontweight='bold', pad=20)
+    ax.set_xlabel('False positive rate', fontsize=34)
+    ax.set_ylabel('True positive rate', fontsize=34)
+    ax.set_title(f'{label_name}', fontsize=34, pad=10)
     
     # Larger tick labels
-    ax.tick_params(axis='both', which='major', labelsize=14)
+    ax.tick_params(axis='both', which='major', labelsize=30)
     
     # Customize legend
     ax.legend(loc='lower right', frameon=True, fancybox=True, shadow=True,
-             fontsize=12, framealpha=0.9)
+             fontsize=22, framealpha=0.9)
     
     # Grid
     ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)

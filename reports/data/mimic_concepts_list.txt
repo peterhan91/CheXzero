@@ -1,0 +1,68 @@
+ 0: lung volumes are lower with bibasilar atelectasis
+ 1: bibasilar atelectasis in the setting of low inspiratory volumes
+ 2: lung volumes low on the left due to basilar atelectasis
+ 3: lung volumes remain low with right basilar atelectasis
+ 4: severe bibasilar atelectasis
+ 5: large bibasilar atelectasis
+ 6: heart size continues to be severely enlarged
+ 7: heart size is chronically and severely enlarged
+ 8: heart size remains moderately to severely enlarged
+ 9: heart is moderately to severely enlarged though improved
+10: heart chronically enlarged
+11: two, now confluent left lower lobe and a consolidative right upper lobe opacity are all worsening
+12: worsening consolidation in the left lower lobe now involving the left upper lobe
+13: consolidation in the right midlung and left lower lung has worsened
+14: severe bilateral perihilar pulmonary consolidation has worsened on the left, improved on the right
+15: left lower lobe consolidation more severe than right
+16: large consolidation in the left lower lobe has worsened
+17: interval worsening of bilateral interstitial pulmonary edema and vascular congestion
+18: pulmonary vascular congestion has worsened to the point of early pulmonary edema
+19: mild-to-moderate pulmonary edema bilaterally has worsened
+20: severe pulmonary edema worsened
+21: widespread pulmonary edema has worsened
+22: bilateral atelectasis has slightly improved on the right and substantially worsened on the left
+23: right middle and lower lobe atelectasis worsened
+24: left lower lung atelectasis has worsened
+25: right lower lobe atelectasis has worsened substantially, perhaps lobar collapse
+26: bilateral lower lobe atelectasis has improved substantially
+27: multiple compression fractures in the lower thoracic and upper lumbar spine
+28: old lower left lateral rib fractures
+29: chronic right lateral rib fracture with adjacent atelectasis
+30: multiple left-sided rib fractures with associated chest wall deformity
+31: severe compression fracture of one of the lower thoracic vertebral bodies
+32: compression deformity of the lower thoracic spine at least a year old
+33: calcified lesion in the left upper lung with associated apical scarring
+34: calcified mass in the right upper peripheral lung
+35: right upper lobe cavitary lung mass
+36: large right upper lobe mass lesion, concerning for lung cancer
+37: calcified nodule in the left upper lobe
+38: severe widespread opacities have worsened in the lower lungs and left upper lobe but improved in right upper lobe
+39: severe worsening of bilateral upper lobe predominant airspace opacities, right greater than left
+40: bilateral extensive asymmetric right greater than left lung opacities have worsened
+41: bilateral opacities on the right and consolidation on the left have increased in extent and severity
+42: bilateral lower lung consolidations have worsened
+43: bilateral pleural effusions have increased, now small-to-moderate on the left and small on the right
+44: small bilateral pleural effusions have worsened
+45: bilateral pleural effusion has worsened
+46: bilateral pleural effusions improved
+47: large left pleural effusion is a little smaller now than before
+48: most of the left upper lobe and the right lung apex chronically scarred
+49: extensive fibrotic changes in the upper lobes bilaterally
+50: severe right lung scarring and concurrent emphysema
+51: chronic interstitial changes in the bilateral lungs
+52: combination of emphysematous changes and scarring in bilateral lungs
+53: multifocal bilateral opacities and consolidation in the right middle lobe
+54: worsening multifocal pulmonary opacities, particularly within the right upper lobe and left lower lobe
+55: bilateral opacities on the right and consolidation on the left have increased in extent and severity
+56: right lower lobe and left upper lobe opacities have worsened
+57: right lower lobe consolidation which has worsened
+58: there is now a tiny right apical pneumothorax and a small right lateral basilar pneumothorax, presumably related to interval placement of new chest tube.
+59: right apical pneumothorax reduced with chest tube in place
+60: no right apical pneumothorax status post removal of right chest tube
+61: left apical pneumothorax resolved
+62: improving small right apical pneumothorax
+63: left pacemaker with leads in the lower right atrium and right ventricle
+64: transvenous pacer leads ending in the right atrium, right ventricle, and left ventricle
+65: dual-chamber pacemaker with lead tips in the right atrium and right ventricular apex
+66: transvenous right atrial biventricular pacer leads
+67: single-lead pacemaker placed with tip in left ventricle

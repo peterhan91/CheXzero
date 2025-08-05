@@ -214,7 +214,35 @@ def should_skip_image(df_row, dataset_name: str) -> bool:
     return len(pathology_labels) == 0 and len(normal_labels) > 0
 
 
-def analyze_image_concepts(dataset_name: str, image_idx: int = None, top_k: int = 30, 
+def break_long_concepts(concepts_list: List[str], max_chars_per_line: int = 50) -> List[str]:
+    """Break long concepts into 2 lines without truncating"""
+    broken_concepts = []
+    for concept in concepts_list:
+        if len(concept) <= max_chars_per_line:
+            broken_concepts.append(concept)
+        else:
+            # Find a good breaking point (prefer breaking at spaces)
+            words = concept.split()
+            line1 = ""
+            line2 = ""
+            
+            # Build first line
+            for word in words:
+                if len(line1 + " " + word) <= max_chars_per_line:
+                    line1 += (" " + word if line1 else word)
+                else:
+                    # Remaining words go to second line
+                    remaining_words = words[len(line1.split()):]
+                    line2 = " ".join(remaining_words)
+                    break
+            
+            # Keep full text without truncation
+            broken_concepts.append(f"{line1}\n{line2}")
+    
+    return broken_concepts
+
+
+def analyze_image_concepts(dataset_name: str, image_idx: int = None, top_k: int = 10, 
                           max_words: int = 12, head_idx: int = 0, 
                           save_plot: bool = True, output_dir: str = "results/concept_analysis") -> Dict:
     """Analyze top concepts for a specific image with attention visualization"""
@@ -275,11 +303,8 @@ def analyze_image_concepts(dataset_name: str, image_idx: int = None, top_k: int 
     dot_products_sorted = dot_products_filtered[sorted_indices_desc]
     concepts_sorted = [concepts_filtered[i] for i in sorted_indices_desc]
     
-    # Truncate long concepts
-    concepts_sorted = [
-        c if len(c.split()) <= max_words else " ".join(c.split()[:max_words]) + "..."
-        for c in concepts_sorted
-    ]
+    # Break long concepts into 2 lines instead of truncating
+    concepts_sorted = break_long_concepts(concepts_sorted)
     
     # Create attention overlay
     label_str = ', '.join(labels) if labels else 'No findings'
@@ -299,10 +324,13 @@ def analyze_image_concepts(dataset_name: str, image_idx: int = None, top_k: int 
     sns.barplot(x=dot_products_sorted, y=concepts_sorted, color='indianred', 
                 edgecolor='black', alpha=1.0, ax=axs[0])
     sns.despine(ax=axs[0], trim=True, left=True, bottom=True)
-    axs[0].set_xlabel('Concept Similarity Score', fontsize=12)
-    axs[0].set_ylabel('Medical Concepts', fontsize=12)
-    axs[0].set_title(f'Top {top_k} Most Important Concepts\n{dataset_name.replace("_", " ").title()} - Image {image_idx}', 
-                     fontsize=14, fontweight='bold')
+    axs[0].set_xlabel('Concept Similarity Score', fontsize=18)
+    axs[0].set_ylabel('')  # Remove y-axis label
+    # axs[0].set_title(f'Top {top_k} Most Important Concepts\n{dataset_name.replace("_", " ").title()} - Image {image_idx}', 
+    #                  fontsize=14, fontweight='bold')
+    # Increase font size for concept labels (y-axis tick labels)
+    axs[0].tick_params(axis='y', labelsize=16)
+    axs[0].tick_params(axis='x', labelsize=16)
     
     # X-axis formatting
     xticks = np.arange(0.2, 1.001, 0.05)
@@ -318,16 +346,16 @@ def analyze_image_concepts(dataset_name: str, image_idx: int = None, top_k: int 
     # Right: CXR with attention overlay
     axs[1].imshow(overlay_img)
     axs[1].axis('off')
-    axs[1].set_title(f'CXR Image with CLS Attention Map\nHead {head_idx} (Top: Original, Bottom: Attention Overlay)', 
-                     fontsize=14, fontweight='bold')
+    # axs[1].set_title(f'CXR Image with CLS Attention Map\nHead {head_idx} (Top: Original, Bottom: Attention Overlay)', 
+    #                  fontsize=14, fontweight='bold')
     
     # Text below image
-    wrapped_text = "\n".join(textwrap.wrap(f'Ground Truth Labels: {label_str}', width=30))
+    wrapped_text = "\n".join(textwrap.wrap(f'Ground Truth Labels: {label_str}', width=60))
     axs[1].text(
         0.5, -0.05, wrapped_text,
         transform=axs[1].transAxes,
         ha='center', va='top',
-        fontsize=11, color='black',
+        fontsize=14, color='black',
         bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.7)
     )
     
@@ -412,23 +440,62 @@ def batch_analyze_concepts(dataset_name: str, num_images: int = 5, top_k: int = 
     return all_results
 
 
+def test_specific_images():
+    """Test specific images from padchest dataset with predefined indices"""
+    test_indices = [2077, 491, 31, 6546, 153, 2110]
+    output_dir = "/home/than/DeepLearning/cxr_concept/CheXzero/concepts/results/concept_analysis_demo"
+    
+    print(f"🚀 Testing specific images from PadChest dataset")
+    print(f"📋 Image indices: {test_indices}")
+    print(f"📁 Output directory: {output_dir}")
+    
+    os.makedirs(output_dir, exist_ok=True)
+    
+    for idx in test_indices:
+        try:
+            print(f"🔍 Analyzing image {idx}...")
+            results = analyze_image_concepts(
+                dataset_name='padchest_test',
+                image_idx=idx,
+                top_k=10,
+                head_idx=0,
+                save_plot=True,
+                output_dir=output_dir
+            )
+            print(f"✅ Completed image {idx}")
+        except Exception as e:
+            print(f"❌ Error analyzing image {idx}: {e}")
+    
+    print(f"\n🎉 Demo analysis completed!")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Analyze highly important concepts with CLS attention maps")
-    parser.add_argument('--dataset', type=str, required=True, 
+    parser.add_argument('--dataset', type=str, 
                        choices=['vindrcxr_test', 'padchest_test', 'indiana_test'],
                        help='Dataset to analyze')
     parser.add_argument('--image_idx', type=int, default=None,
                        help='Specific image index to analyze (default: random)')
     parser.add_argument('--batch_size', type=int, default=1,
                        help='Number of images to analyze (default: 1)')
-    parser.add_argument('--top_k', type=int, default=25,
-                       help='Number of top concepts to show (default: 30)')
+    parser.add_argument('--top_k', type=int, default=10,
+                       help='Number of top concepts to show (default: 10)')
     parser.add_argument('--head_idx', type=int, default=0,
                        help='Attention head to visualize (default: 0, use -1 for averaged)')
     parser.add_argument('--output_dir', type=str, default="results/concept_analysis",
                        help='Output directory for results')
+    parser.add_argument('--demo', action='store_true',
+                       help='Run demo with specific PadChest images')
     
     args = parser.parse_args()
+    
+    if args.demo:
+        test_specific_images()
+        return
+    
+    # Check if dataset is required for non-demo mode
+    if not args.dataset:
+        parser.error("--dataset is required when not using --demo")
     
     print(f"🚀 Starting Highly Important Concepts Analysis")
     print(f"📊 Dataset: {args.dataset}")

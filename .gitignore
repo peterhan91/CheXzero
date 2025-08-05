@@ -6,7 +6,13 @@ concepts/mimic_concepts.csv
 *.sh
 *.pkl
 *.png
+*.jpg
+*.npz
+*.npy
 *.json
+*.h5
+*.pt
+*.csv
 multimodal_nejm/cxr_cases/*
 multimodal_nejm/results/*
 plots/*
@@ -24,3 +30,4 @@ notebooks/reports.ipynb
 notebooks/img_hdf5.ipynb
 benchmark/external_sota/*
 benchmark/results/*
+CLAUDE.md

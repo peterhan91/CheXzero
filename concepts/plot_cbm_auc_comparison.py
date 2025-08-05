@@ -51,7 +51,7 @@ def process_csv_metrics(df, metric_name):
     # Map CSV method names to display names
     method_mapping = {
         'Standard': 'Standard CBM',
-        'Improved': 'LLM Embedding CBM'
+        'Improved': 'CheXomni CBM'
     }
     
     results = {method_mapping[method]: {dataset: {label: [] for label in labels} for dataset in datasets} for method in methods}
@@ -88,7 +88,7 @@ def compute_auc_scores_per_label(y_true, y_pred, labels):
 def collect_auc_results_per_label(zeroshot_data, seed_data):
     """Collect AUC results for all methods, datasets, and labels"""
     datasets = ['chexpert', 'vindrcxr', 'padchest', 'indiana']
-    methods = ['Standard CBM', 'LLM Embedding CBM']  # Only these two methods
+    methods = ['Standard CBM', 'CheXomni CBM']  # Only these two methods
     
     # Get labels from any dataset
     sample_dataset = list(zeroshot_data.keys())[0]
@@ -97,7 +97,7 @@ def collect_auc_results_per_label(zeroshot_data, seed_data):
     # Initialize results structure: {method: {dataset: {label: [aucs]}}}
     results = {method: {dataset: {label: [] for label in labels} for dataset in datasets} for method in methods}
     
-    # Standard and LLM Embedding CBM results (across seeds)
+    # Standard and CheXomni CBM results (across seeds)
     for seed, data in seed_data.items():
         for dataset in datasets:
             # Standard CBM
@@ -108,13 +108,13 @@ def collect_auc_results_per_label(zeroshot_data, seed_data):
                 for label in labels:
                     results['Standard CBM'][dataset][label].append(aucs[label])
             
-            # LLM Embedding CBM
+            # CheXomni CBM
             if dataset in data['improved']:
                 y_true = data['improved'][dataset]['y_true']
                 y_pred = data['improved'][dataset]['y_pred']
                 aucs = compute_auc_scores_per_label(y_true, y_pred, labels)
                 for label in labels:
-                    results['LLM Embedding CBM'][dataset][label].append(aucs[label])
+                    results['CheXomni CBM'][dataset][label].append(aucs[label])
     
     return results, labels
 
@@ -122,7 +122,7 @@ def create_single_metric_plot(ax, results, labels, metric_name, y_label, show_xa
     """Create a single metric plot (AUROC, F1, or MCC)"""
     datasets = ['chexpert', 'vindrcxr', 'padchest', 'indiana']
     dataset_labels = ['CheXpert', 'VinDr-CXR', 'PadChest', 'Indiana']
-    methods = ['Standard CBM', 'LLM Embedding CBM']
+    methods = ['Standard CBM', 'CheXomni CBM']
     
     # Colors for datasets and methods
     palette = sns.color_palette("Set2")
@@ -191,7 +191,7 @@ def create_single_metric_plot(ax, results, labels, metric_name, y_label, show_xa
     
     # Set y-limits based on metric type
     if metric_name == 'AUROC':
-        ax.set_ylim(0.5, 1.02)
+        ax.set_ylim(0.7, 1.02)
     else:  # F1 and MCC
         ax.set_ylim(0, 1.02)
     
@@ -203,10 +203,10 @@ def create_comprehensive_cbm_plot(auc_results, f1_results, mcc_results, labels, 
     """Create a comprehensive plot with two vertical subplots for AUROC and MCC"""
     datasets = ['chexpert', 'vindrcxr', 'padchest', 'indiana']
     dataset_labels = ['CheXpert', 'VinDr-CXR', 'PadChest', 'Indiana']
-    methods = ['Standard CBM', 'LLM Embedding CBM']
+    methods = ['Standard CBM', 'CheXomni CBM']
     
     # Create figure with two vertical subplots
-    fig, axes = plt.subplots(2, 1, figsize=(18, 16))
+    fig, axes = plt.subplots(2, 1, figsize=(16, 11))
     
     # Create each subplot - show x-axis labels on both plots
     create_single_metric_plot(axes[0], auc_results, labels, 'AUROC', 'AUROC', show_xaxis=True)
@@ -256,14 +256,14 @@ def print_summary_table_per_label(results, labels):
     """Print a summary table of results for each label"""
     datasets = ['chexpert', 'vindrcxr', 'padchest', 'indiana']
     dataset_labels = ['CheXpert', 'VinDr-CXR', 'PadChest', 'Indiana']
-    methods = ['Standard CBM', 'LLM Embedding CBM']
+    methods = ['Standard CBM', 'CheXomni CBM']
     
     for label in labels:
         print(f"\n" + "="*70)
         print(f"CBM AUC COMPARISON - {label.upper()}")
         print("="*70)
         
-        print(f"{'Dataset':<12} {'Standard CBM':<20} {'LLM Embedding CBM':<20}")
+        print(f"{'Dataset':<12} {'Standard CBM':<20} {'CheXomni CBM':<20}")
         print("-" * 70)
         
         for dataset, dataset_label in zip(datasets, dataset_labels):

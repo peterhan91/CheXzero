@@ -152,31 +152,31 @@ def sample_chexpert_validation():
     
     print(f"   Using text column: {text_col}")
     
-    print("\n=== Step 2: Filter Reports with IMPRESSION ===")
+    print("\n=== Step 2: Filter Reports with FINDINGS and IMPRESSION ===")
     valid_reports = []
     
     for idx, row in tqdm(reports_df.iterrows(), desc="Filtering reports"):
         report_text = row[text_col] if not pd.isna(row[text_col]) else ""
         findings, impression = extract_sections(report_text)
         
-        # Keep only reports with IMPRESSION
-        if impression.strip():
+        # Keep only reports with both FINDINGS and IMPRESSION (for consistency with MIMIC training)
+        if impression.strip() and findings.strip():
             valid_reports.append({
                 'original_index': idx,
-                'path': row.get('Path', ''),
+                'path': row.get('path_to_image', ''),
                 'findings': findings,
                 'impression': impression,
                 'original_text': report_text
             })
     
-    print(f"✅ Found {len(valid_reports)} reports with IMPRESSION")
+    print(f"✅ Found {len(valid_reports)} reports with both FINDINGS and IMPRESSION")
     
-    print("\n=== Step 3: Sample 500 Cases ===")
+    print("\n=== Step 3: Sample Validation Cases ===")
     random.seed(42)  # For reproducibility
     sample_size = min(500, len(valid_reports))
     sampled_reports = random.sample(valid_reports, sample_size)
     
-    print(f"✅ Sampled {sample_size} cases for validation")
+    print(f"✅ Sampled {sample_size} cases for validation (target: 500)")
     
     # Get the original indices for image extraction
     sampled_indices = [r['original_index'] for r in sampled_reports]
@@ -253,14 +253,12 @@ def sample_chexpert_validation():
     validation_data = []
     
     for i, report_data in enumerate(sampled_reports):
-        # Combine findings and impression
+        # Combine findings and impression (matching MIMIC format)
         findings = report_data['findings']
         impression = report_data['impression']
         
-        if findings.strip():
-            combined_text = f"FINDINGS: {findings} IMPRESSION: {impression}"
-        else:
-            combined_text = f"IMPRESSION: {impression}"
+        # All reports now have both FINDINGS and IMPRESSION (due to filtering)
+        combined_text = f"FINDINGS: {findings}\n\nIMPRESSION: {impression}"
         
         validation_data.append({
             'sample_id': i,
@@ -289,15 +287,16 @@ def sample_chexpert_validation():
         f.create_dataset('concept_scores', data=concept_scores_matrix, compression='gzip')
         f.create_dataset('concept_names', data=[c.encode('utf-8') for c in concepts])
         
-        # Save indices for image retrieval
+        # Save indices and paths for image retrieval
         f.create_dataset('original_indices', data=[d['original_index'] for d in validation_data])
+        f.create_dataset('paths', data=[d['path'].encode('utf-8') for d in validation_data])
         
         # Save metadata
         f.attrs['num_samples'] = len(validation_data)
         f.attrs['num_concepts'] = len(concepts)
         f.attrs['image_source'] = 'chexpert.h5'
         f.attrs['image_resolution'] = 448
-        f.attrs['description'] = 'CheXpert validation dataset (500 samples) with concept scores'
+        f.attrs['description'] = 'CheXpert validation dataset with FINDINGS+IMPRESSION format (consistent with MIMIC training)'
         f.attrs['sampling_seed'] = 42
     
     print(f"✅ Saved validation dataset to: {output_h5}")
