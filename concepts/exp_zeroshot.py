@@ -38,8 +38,8 @@ def print_gpu_memory(stage=""):
 class LLMEmbeddingGenerator:
     def __init__(self):
         # Load API credentials from environment variables for security
-        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "https://ukatrki02.openai.azure.com")
-        api_key = os.getenv("AZURE_OPENAI_KEY", "235fa0c2e26b4595aca8227923c59720")
+        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "sth")
+        api_key = os.getenv("AZURE_OPENAI_KEY", "sth")
         
         self.openai_client = AzureOpenAI(
             azure_endpoint=azure_endpoint,
