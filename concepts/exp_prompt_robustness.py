@@ -155,6 +155,14 @@ class LLMEmbeddingGenerator:
 def get_dataset_config(dataset_name):
     """Get dataset-specific configuration."""
     configs = {
+        'chexpert_valid': {
+            'cxr_filepath': "/home/than/DeepLearning/cxr_concept/CheXzero/data/chexpert_valid.h5",
+            'labels_path': "/home/than/DeepLearning/cxr_concept/CheXzero/data/chexpert_valid.csv",
+            'labels': ['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema',
+                       'Enlarged Cardiomediastinum', 'Fracture', 'Lung Lesion',
+                       'Lung Opacity', 'No Finding', 'Pleural Effusion',
+                       'Pleural Other', 'Pneumonia', 'Pneumothorax', 'Support Devices'],
+        },
         'chexpert': {
             'cxr_filepath': "/home/than/DeepLearning/cxr_concept/CheXzero/data/chexpert_test.h5",
             'labels_path': "/home/than/DeepLearning/cxr_concept/CheXzero/data/chexpert_test.csv",
@@ -455,7 +463,7 @@ def run_robustness_experiment(dataset_name: str, llm_model: str):
 def main():
     parser = argparse.ArgumentParser(description='Prompt Robustness Experiment')
     parser.add_argument('--dataset', default='vindrcxr',
-                        choices=['chexpert', 'vindrcxr', 'padchest', 'indiana'])
+                        choices=['chexpert_valid', 'chexpert', 'vindrcxr', 'padchest', 'indiana'])
     parser.add_argument('--model', default='sfr_mistral',
                         choices=['sfr_mistral', 'qwen3_8b', 'openai_small', 'biomedbert'])
     parser.add_argument('--all-models', action='store_true',
