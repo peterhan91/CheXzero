@@ -214,7 +214,7 @@ def plot_roc_curve_for_label(standard_predictions, improved_predictions, label_n
     
     if not imp_is_dummy:
         ax.plot(fpr_grid_imp, tpr_mean_imp, color='indianred', linewidth=3, alpha=1,
-                label=f'CheXomni CBM (AUC = {np.mean(auc_scores_imp):.3f})')
+                label=f'CLEAR CBM (AUC = {np.mean(auc_scores_imp):.3f})')
     else:
         ax.plot(fpr_grid_imp, tpr_mean_imp, color='indianred', linewidth=3, alpha=0.3,
                 label='LLM-based CBM (Invalid - one class only)')
@@ -226,7 +226,7 @@ def plot_roc_curve_for_label(standard_predictions, improved_predictions, label_n
     
     if not imp_is_dummy:
         ax.fill_between(fpr_grid_imp, tpr_lower_imp, tpr_upper_imp,
-                       color='indianred', alpha=0.2, label='CheXomni CBM 95% CI')
+                       color='indianred', alpha=0.2, label='CLEAR CBM 95% CI')
     
     # Radiologist headers (order matters!)
     radiologist_headers = [

@@ -78,13 +78,13 @@ def plot_roc_comparison(zero_shot_ours_data, zero_shot_chexzero_data,
     
     # Plot ROC curves with updated colors
     ax.plot(fpr_zs_ours, tpr_zs_ours, color='lightcoral', linewidth=3, alpha=1,
-            label=f'CheXomni (zero-shot AUC = {auc_zs_ours:.3f})')
+            label=f'CLEAR (zero-shot AUC = {auc_zs_ours:.3f})')
     
     ax.plot(fpr_zs_chexzero, tpr_zs_chexzero, color='lightblue', linewidth=3, alpha=1,
             label=f'CheXzero (zero-shot AUC = {auc_zs_chexzero:.3f})')
     
     ax.plot(fpr_lp_ours, tpr_lp_ours, color='indianred', linewidth=3, alpha=1,
-            label=f'CheXomni (linear probe AUC = {auc_lp_ours:.3f})')
+            label=f'CLEAR (linear probe AUC = {auc_lp_ours:.3f})')
     
     ax.plot(fpr_lp_chexzero, tpr_lp_chexzero, color='steelblue', linewidth=3, alpha=1,
             label=f'CheXzero (linear probe AUC = {auc_lp_chexzero:.3f})')

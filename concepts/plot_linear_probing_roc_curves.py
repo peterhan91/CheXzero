@@ -136,11 +136,12 @@ def plot_roc_curve_for_label(model_predictions, label_name, label_idx, output_di
     ax.set_aspect('equal')
     
     # Colors for different models
+    # palette = sns.color_palette("Set3")
     colors = ['indianred', 'steelblue', 'darkgreen', 'darkorange']
     
     # Pretty model names for legend
     model_display_names = {
-        'concept_based_linear_probing': 'CheXomni',
+        'concept_based_linear_probing': 'CLEAR',
         'chexzero': 'CheXzero',
         'biomedclip': 'BiomedCLIP', 
         'openai_clip': 'OpenAI CLIP'

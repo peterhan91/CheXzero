@@ -293,7 +293,7 @@ def plot_concept_importance(concept_weights, std_weights, all_weights, concepts,
             if "Standard_CBM" in method_name:
                 method_display = "Standard CBM"
             elif "Improved_CBM" in method_name:
-                method_display = "CheXomni CBM"
+                method_display = "CLEAR CBM"
             else:
                 method_display = method_name
             
