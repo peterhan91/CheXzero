@@ -203,7 +203,7 @@ def create_comprehensive_cbm_plot(auc_results, f1_results, mcc_results, labels, 
     """Create a comprehensive plot with two vertical subplots for AUROC and MCC"""
     datasets = ['chexpert', 'vindrcxr', 'padchest', 'indiana']
     dataset_labels = ['CheXpert', 'VinDr-CXR', 'PadChest', 'Indiana']
-    methods = ['Standard CBM', 'CheXomni CBM']
+    methods = ['Standard CBM', 'CLEAR CBM']
     
     # Create figure with two vertical subplots
     fig, axes = plt.subplots(2, 1, figsize=(16, 11))

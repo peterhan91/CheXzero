@@ -9,7 +9,7 @@ import numpy as np
 import time
 import pickle
 from tqdm import tqdm
-from openai import AzureOpenAI
+from openai import OpenAI
 import gc
 
 import torch
@@ -38,14 +38,11 @@ def print_gpu_memory(stage=""):
 class LLMEmbeddingGenerator:
     def __init__(self):
         # Load API credentials from environment variables for security
-        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "https://ukatrki02.openai.azure.com")
-        api_key = os.getenv("AZURE_OPENAI_KEY", "235fa0c2e26b4595aca8227923c59720")
-        
-        self.openai_client = AzureOpenAI(
-            azure_endpoint=azure_endpoint,
-            api_key=api_key,
-            api_version="2024-02-01"
-        )
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY environment variable not set")
+
+        self.openai_client = OpenAI(api_key=api_key)
         self.openai_model = "text-embedding-3-small"
         
         # Cache for local embedding generators to avoid reloading
