@@ -64,11 +64,11 @@ def compute_sample_weights(df, downweight_factor=0.1):
     weights[co_occurring] = downweight_factor
 
     stats = {
-        'total_samples': len(df),
-        'ec_positive': ec_labels.sum(),
-        'atelectasis_positive': ate_labels.sum(),
-        'co_occurring': co_occurring.sum(),
-        'co_occurrence_rate_in_ec': co_occurring.sum() / max(ec_labels.sum(), 1)
+        'total_samples': int(len(df)),
+        'ec_positive': int(ec_labels.sum()),
+        'atelectasis_positive': int(ate_labels.sum()),
+        'co_occurring': int(co_occurring.sum()),
+        'co_occurrence_rate_in_ec': float(co_occurring.sum() / max(ec_labels.sum(), 1))
     }
 
     return weights, stats
