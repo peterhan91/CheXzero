@@ -10,7 +10,6 @@ shift concept attributions from atelectasis to mediastinal concepts.
 """
 
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 import json
 import numpy as np
 import pandas as pd
