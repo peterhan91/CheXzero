@@ -2,15 +2,22 @@
 """
 Experiment B: Curated Concept Intervention for EC Classification
 ================================================================
-Uses clinically correct mediastinal concepts instead of the learned
-atelectasis-dominated concepts for Enlarged Cardiomediastinum classification.
+Compares atelectasis-based concepts (confounded) vs mediastinal concepts
+(clinically correct) for Enlarged Cardiomediastinum classification.
 
-Hypothesis: Using mediastinal-specific concepts will produce more clinically
-valid predictions and improve generalization.
+Two modes:
+- 'curated': Hand-crafted concept lists (small, precise)
+- 'searched': Pattern-matched from full 368k vocabulary (comprehensive)
+
+Usage:
+    python exp_intervention_B_curated_concepts.py --mode curated
+    python exp_intervention_B_curated_concepts.py --mode searched
 """
 
 import os
 import json
+import re
+import argparse
 import numpy as np
 import pandas as pd
 import torch
@@ -41,32 +48,53 @@ CHEXPERT_TEST_LABELS = "/home/than/DeepLearning/CheXzero/data/chexpert_test.csv"
 CLIP_CONCEPT_CACHE = "cache/clip_concept_features.pkl"
 CLIP_MODEL_PATH = "/home/than/DeepLearning/cxr_concept/CheXzero/checkpoints/dinov2-multi-v1.0_vitb/best_model.pt"
 
-# Clinically correct EC concepts (manually curated)
-CURATED_EC_CONCEPTS = [
+# ============================================================================
+# MODE 1: Hand-crafted curated concepts (small, precise)
+# ============================================================================
+CURATED_ATELECTASIS_CONCEPTS = [
+    "bilateral atelectasis",
+    "bibasilar atelectasis",
+    "lower lobe atelectasis",
+    "right lower lobe atelectasis",
+    "left lower lobe atelectasis",
+    "subsegmental atelectasis",
+    "linear atelectasis",
+    "basilar atelectasis",
+    "atelectatic changes",
+    "atelectasis worsened",
+]
+
+CURATED_MEDIASTINAL_CONCEPTS = [
     "mediastinal widening",
     "widened mediastinum",
     "enlarged mediastinum",
-    "mediastinal enlargement",
+    "cardiomediastinal silhouette",
+    "mediastinal contour",
     "prominent mediastinum",
-    "mediastinal mass",
-    "enlarged cardiac silhouette",
-    "prominent aortic knob",
+    "cardiomegaly",
+    "enlarged heart",
+    "heart size enlarged",
     "tortuous aorta",
     "aortic enlargement",
+    "prominent aortic knob",
     "hilar enlargement",
     "prominent hila",
-    "superior mediastinal widening",
-    "paratracheal widening",
-    "mediastinal contour abnormality"
+    "cardiac silhouette enlarged",
 ]
 
-# Original (confounded) concepts from cbm_concepts.json
-ORIGINAL_EC_CONCEPTS = [
-    "bilateral atelectasis has slightly improved on the right and substantially worsened on the left",
-    "right middle and lower lobe atelectasis worsened",
-    "left lower lung atelectasis has worsened",
-    "right lower lobe atelectasis has worsened substantially, perhaps lobar collapse",
-    "bilateral lower lobe atelectasis has improved substantially"
+# ============================================================================
+# MODE 2: Search patterns for mimic_concepts.csv (comprehensive)
+# ============================================================================
+SEARCH_ATELECTASIS_PATTERNS = [r'atelectasis', r'atelectatic']
+
+SEARCH_MEDIASTINAL_PATTERNS = [
+    r'mediastin',                    # mediastinum, mediastinal, cardiomediastinal
+    r'cardiomegaly',                 # cardiomegaly
+    r'heart.*(enlarg|size)',         # heart enlargement, heart size
+    r'(enlarg|prominent).*heart',
+    r'aort',                         # aorta, aortic
+    r'hilar',                        # hilar
+    r'\bhila\b',                     # hila (word boundary)
 ]
 
 
@@ -114,12 +142,28 @@ def set_random_seed(seed):
     torch.backends.cudnn.benchmark = False
 
 
-def find_concept_indices(concepts, target_concepts):
-    """Find indices of target concepts in the concept list (fuzzy match)"""
+def search_concepts_by_patterns(concepts, patterns):
+    """Search for concepts matching any of the given regex patterns"""
     indices = []
-    matched = []
+    matched_concepts = []
 
-    for target in target_concepts:
+    for i, concept in enumerate(concepts):
+        concept_lower = concept.lower()
+        for pattern in patterns:
+            if re.search(pattern, concept_lower):
+                indices.append(i)
+                matched_concepts.append(concept)
+                break  # Only add once per concept
+
+    return indices, matched_concepts
+
+
+def find_concepts_by_substring(concepts, target_list):
+    """Find concepts containing any of the target substrings (fuzzy match)"""
+    indices = []
+    matched_concepts = []
+
+    for target in target_list:
         target_lower = target.lower()
         best_match = None
         best_score = 0
@@ -132,11 +176,11 @@ def find_concept_indices(concepts, target_concepts):
                     best_score = score
                     best_match = (i, concept)
 
-        if best_match:
+        if best_match and best_match[0] not in indices:
             indices.append(best_match[0])
-            matched.append((target, best_match[1]))
+            matched_concepts.append(best_match[1])
 
-    return indices, matched
+    return indices, matched_concepts
 
 
 def load_concepts_and_embeddings():
@@ -225,7 +269,7 @@ def extract_cbm_features(clip_model, clip_concept_features, concept_indices):
     return features, labels
 
 
-def train_and_evaluate(features, labels, concepts, concept_indices, seed=42):
+def train_and_evaluate(features, labels, concepts, concept_indices, lr=1e-3, seed=42):
     """Train with early stopping and evaluate on test set"""
     set_random_seed(seed)
 
@@ -251,7 +295,7 @@ def train_and_evaluate(features, labels, concepts, concept_indices, seed=42):
     input_dim = features['train'].shape[1]
     model = LogisticRegressionModel(input_dim).to(device)
     criterion = nn.BCELoss()
-    optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-8)
+    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-8)
 
     # Training with early stopping
     best_val_auc = 0
@@ -305,7 +349,7 @@ def train_and_evaluate(features, labels, concepts, concept_indices, seed=42):
         test_targets = torch.cat(test_targets).numpy()
     test_auc = roc_auc_score(test_targets, test_preds)
 
-    # Get concept importance
+    # Get concept importance (top 20)
     weights = model.linear.weight.detach().cpu().numpy().flatten()
     importance = [(concepts[concept_indices[i]], float(weights[i])) for i in range(len(concept_indices))]
     importance.sort(key=lambda x: abs(x[1]), reverse=True)
@@ -313,16 +357,24 @@ def train_and_evaluate(features, labels, concepts, concept_indices, seed=42):
     return {
         'val_auc': float(best_val_auc),
         'test_auc': float(test_auc),
-        'concept_importance': importance[:10]
+        'concept_importance': importance[:20]
     }
 
 
-def main():
-    results_dir = 'results/intervention_B_curated_concepts'
+def run_experiment(mode='searched'):
+    """Run experiment with specified mode"""
+    # Set output directory based on mode
+    if mode == 'curated':
+        results_dir = 'results/intervention_B_curated_concepts_handcrafted'
+        lr = 1e-3  # Higher lr for small concept set
+    else:  # searched
+        results_dir = 'results/intervention_B_curated_concepts_searched'
+        lr = 1e-3  # Same lr, but more features
+
     os.makedirs(results_dir, exist_ok=True)
 
     print("="*60)
-    print("EXPERIMENT B: Curated Concept Intervention (20 seeds)")
+    print(f"EXPERIMENT B: Curated Concept Intervention - {mode.upper()} mode")
     print("="*60)
 
     # Load CLIP model
@@ -343,23 +395,44 @@ def main():
         cache = pickle.load(f)
     clip_concept_features = cache['concept_features'].to(device)
 
-    # Find concept indices for both sets
-    original_indices, original_matched = find_concept_indices(concepts, ORIGINAL_EC_CONCEPTS)
-    curated_indices, curated_matched = find_concept_indices(concepts, CURATED_EC_CONCEPTS)
+    # Get concept indices based on mode
+    print("\nFinding concepts...")
+    if mode == 'curated':
+        atelectasis_indices, atelectasis_matched = find_concepts_by_substring(
+            concepts, CURATED_ATELECTASIS_CONCEPTS
+        )
+        mediastinal_indices, mediastinal_matched = find_concepts_by_substring(
+            concepts, CURATED_MEDIASTINAL_CONCEPTS
+        )
+        atelectasis_spec = CURATED_ATELECTASIS_CONCEPTS
+        mediastinal_spec = CURATED_MEDIASTINAL_CONCEPTS
+    else:  # searched
+        atelectasis_indices, atelectasis_matched = search_concepts_by_patterns(
+            concepts, SEARCH_ATELECTASIS_PATTERNS
+        )
+        mediastinal_indices, mediastinal_matched = search_concepts_by_patterns(
+            concepts, SEARCH_MEDIASTINAL_PATTERNS
+        )
+        atelectasis_spec = SEARCH_ATELECTASIS_PATTERNS
+        mediastinal_spec = SEARCH_MEDIASTINAL_PATTERNS
 
-    print(f"\nOriginal concepts: Found {len(original_indices)}/{len(ORIGINAL_EC_CONCEPTS)}")
-    print(f"Curated concepts: Found {len(curated_indices)}/{len(CURATED_EC_CONCEPTS)}")
+    print(f"Atelectasis concepts found: {len(atelectasis_indices)}")
+    print(f"Mediastinal concepts found: {len(mediastinal_indices)}")
+
+    # Show some examples
+    print(f"\nAtelectasis examples: {atelectasis_matched[:3]}")
+    print(f"Mediastinal examples: {mediastinal_matched[:3]}")
 
     # Extract features once
     print("\n" + "="*60)
-    print("Extracting ORIGINAL concept features")
+    print("Extracting ATELECTASIS concept features (confounded)")
     print("="*60)
-    features_original, labels = extract_cbm_features(clip_model, clip_concept_features, original_indices)
+    features_atelectasis, labels = extract_cbm_features(clip_model, clip_concept_features, atelectasis_indices)
 
     print("\n" + "="*60)
-    print("Extracting CURATED concept features")
+    print("Extracting MEDIASTINAL concept features (curated)")
     print("="*60)
-    features_curated, _ = extract_cbm_features(clip_model, clip_concept_features, curated_indices)
+    features_mediastinal, _ = extract_cbm_features(clip_model, clip_concept_features, mediastinal_indices)
 
     # Run with 20 seeds
     print("\n" + "="*60)
@@ -367,69 +440,99 @@ def main():
     print("="*60)
 
     seeds = list(range(42, 62))
-    original_results = []
-    curated_results = []
+    atelectasis_results = []
+    mediastinal_results = []
 
     for i, seed in enumerate(seeds):
         print(f"\n--- Seed {seed} ({i+1}/20) ---")
 
-        original_result = train_and_evaluate(features_original, labels, concepts, original_indices, seed=seed)
-        curated_result = train_and_evaluate(features_curated, labels, concepts, curated_indices, seed=seed)
+        atelectasis_result = train_and_evaluate(
+            features_atelectasis, labels, concepts, atelectasis_indices, lr=lr, seed=seed
+        )
+        mediastinal_result = train_and_evaluate(
+            features_mediastinal, labels, concepts, mediastinal_indices, lr=lr, seed=seed
+        )
 
-        original_results.append(original_result)
-        curated_results.append(curated_result)
+        atelectasis_results.append(atelectasis_result)
+        mediastinal_results.append(mediastinal_result)
 
-        print(f"  Original Test AUC: {original_result['test_auc']:.4f}")
-        print(f"  Curated Test AUC: {curated_result['test_auc']:.4f}")
-        print(f"  Difference: {curated_result['test_auc'] - original_result['test_auc']:+.4f}")
+        print(f"  Atelectasis (confounded) Test AUC: {atelectasis_result['test_auc']:.4f}")
+        print(f"  Mediastinal (curated) Test AUC: {mediastinal_result['test_auc']:.4f}")
+        print(f"  Improvement: {mediastinal_result['test_auc'] - atelectasis_result['test_auc']:+.4f}")
 
     # Aggregate results
-    original_test_aucs = [r['test_auc'] for r in original_results]
-    curated_test_aucs = [r['test_auc'] for r in curated_results]
-    differences = [c - o for c, o in zip(curated_test_aucs, original_test_aucs)]
+    atelectasis_test_aucs = [r['test_auc'] for r in atelectasis_results]
+    mediastinal_test_aucs = [r['test_auc'] for r in mediastinal_results]
+    improvements = [m - a for m, a in zip(mediastinal_test_aucs, atelectasis_test_aucs)]
 
     # Summary
     print("\n" + "="*60)
-    print("SUMMARY (20 seeds)")
+    print(f"SUMMARY - {mode.upper()} mode (20 seeds)")
     print("="*60)
-    print(f"\nOriginal Concepts ({len(original_indices)} concepts):")
-    print(f"  Test AUC: {np.mean(original_test_aucs):.4f} ± {np.std(original_test_aucs):.4f}")
+    print(f"\nAtelectasis Concepts (confounded, {len(atelectasis_indices)} concepts):")
+    print(f"  Test AUC: {np.mean(atelectasis_test_aucs):.4f} +/- {np.std(atelectasis_test_aucs):.4f}")
 
-    print(f"\nCurated Concepts ({len(curated_indices)} concepts):")
-    print(f"  Test AUC: {np.mean(curated_test_aucs):.4f} ± {np.std(curated_test_aucs):.4f}")
+    print(f"\nMediastinal Concepts (curated, {len(mediastinal_indices)} concepts):")
+    print(f"  Test AUC: {np.mean(mediastinal_test_aucs):.4f} +/- {np.std(mediastinal_test_aucs):.4f}")
 
-    print(f"\nDifference: {np.mean(differences):+.4f} ± {np.std(differences):.4f}")
+    print(f"\nImprovement: {np.mean(improvements):+.4f} +/- {np.std(improvements):.4f}")
 
     # Save results
     results = {
+        'mode': mode,
         'num_seeds': 20,
         'seeds': seeds,
-        'original_concept_list': ORIGINAL_EC_CONCEPTS,
-        'curated_concept_list': CURATED_EC_CONCEPTS,
-        'num_original_concepts': len(original_indices),
-        'num_curated_concepts': len(curated_indices),
-        'original': {
-            'test_auc_mean': float(np.mean(original_test_aucs)),
-            'test_auc_std': float(np.std(original_test_aucs)),
-            'test_aucs': original_test_aucs,
-            'all_results': original_results
+        'learning_rate': lr,
+        'atelectasis_spec': atelectasis_spec,
+        'mediastinal_spec': mediastinal_spec,
+        'num_atelectasis_concepts': len(atelectasis_indices),
+        'num_mediastinal_concepts': len(mediastinal_indices),
+        'atelectasis_examples': atelectasis_matched[:10],
+        'mediastinal_examples': mediastinal_matched[:10],
+        'atelectasis': {
+            'test_auc_mean': float(np.mean(atelectasis_test_aucs)),
+            'test_auc_std': float(np.std(atelectasis_test_aucs)),
+            'test_aucs': atelectasis_test_aucs,
+            'all_results': atelectasis_results
         },
-        'curated': {
-            'test_auc_mean': float(np.mean(curated_test_aucs)),
-            'test_auc_std': float(np.std(curated_test_aucs)),
-            'test_aucs': curated_test_aucs,
-            'all_results': curated_results
+        'mediastinal': {
+            'test_auc_mean': float(np.mean(mediastinal_test_aucs)),
+            'test_auc_std': float(np.std(mediastinal_test_aucs)),
+            'test_aucs': mediastinal_test_aucs,
+            'all_results': mediastinal_results
         },
-        'difference': {
-            'mean': float(np.mean(differences)),
-            'std': float(np.std(differences)),
-            'all': differences
+        'improvement': {
+            'mean': float(np.mean(improvements)),
+            'std': float(np.std(improvements)),
+            'all': improvements
         }
     }
     with open(f'{results_dir}/results.json', 'w') as f:
         json.dump(results, f, indent=2)
 
     print(f"\nResults saved to: {results_dir}")
+    return results
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Experiment B: Curated Concept Intervention')
+    parser.add_argument('--mode', type=str, choices=['curated', 'searched', 'both'],
+                        default='both',
+                        help='Mode: curated (hand-crafted), searched (pattern-matched), or both')
+    args = parser.parse_args()
+
+    if args.mode == 'both':
+        print("\n" + "#"*60)
+        print("# Running CURATED mode")
+        print("#"*60)
+        run_experiment('curated')
+
+        print("\n" + "#"*60)
+        print("# Running SEARCHED mode")
+        print("#"*60)
+        run_experiment('searched')
+    else:
+        run_experiment(args.mode)
 
 
 if __name__ == "__main__":
