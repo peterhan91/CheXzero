@@ -224,11 +224,19 @@ def extract_clip_features(model, h5_path, num_samples, batch_size=64):
     return torch.cat(all_features)
 
 
-def compute_cbm_features(img_features, clip_concept_features, concept_indices):
-    """Compute CBM-style features using only selected concepts"""
+def compute_cbm_features(img_features, clip_concept_features, concept_indices, batch_size=1000):
+    """Compute CBM-style features using only selected concepts (memory efficient)"""
     selected_clip = clip_concept_features[concept_indices]
-    similarities = img_features @ selected_clip.T
-    return similarities
+
+    # Process in batches to avoid OOM
+    all_similarities = []
+    for i in range(0, len(img_features), batch_size):
+        batch_img = img_features[i:i+batch_size].to(device)
+        batch_sim = batch_img @ selected_clip.T
+        all_similarities.append(batch_sim.cpu())
+        torch.cuda.empty_cache()
+
+    return torch.cat(all_similarities, dim=0)
 
 
 def extract_cbm_features(clip_model, clip_concept_features, concept_indices):
