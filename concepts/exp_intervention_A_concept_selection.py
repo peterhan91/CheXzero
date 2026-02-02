@@ -483,6 +483,38 @@ def run_experiment(mode, clip_model, concepts, concept_embeddings, clip_concept_
     return summary, features, labels
 
 
+def load_existing_baseline():
+    """Load baseline results from previous experiment if available"""
+    baseline_file = 'results/intervention_A_concept_removal/results.json'
+    if os.path.exists(baseline_file):
+        with open(baseline_file, 'r') as f:
+            data = json.load(f)
+        if 'baseline' in data:
+            baseline = data['baseline']
+            # Total concepts = kept + removed in intervention
+            total_concepts = 368294  # From mimic_concepts.csv
+            return {
+                'mode': 'baseline',
+                'mask_stats': {
+                    'mode': 'baseline',
+                    'total_concepts': total_concepts,
+                    'kept_concepts': total_concepts,
+                    'removed_concepts': 0,
+                },
+                'learning_rate': 2e-4,
+                'num_seeds': data.get('num_seeds', 20),
+                'seeds': data.get('seeds', list(range(42, 62))),
+                'test_auc_mean': baseline['test_auc_mean'],
+                'test_auc_std': baseline['test_auc_std'],
+                'test_aucs': baseline['test_aucs'],
+                'val_auc_mean': float(np.mean([r['val_auc'] for r in baseline['all_results']])),
+                'val_auc_std': float(np.std([r['val_auc'] for r in baseline['all_results']])),
+                'val_aucs': [r['val_auc'] for r in baseline['all_results']],
+                'all_results': baseline['all_results'],
+            }
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description='Concept Selection Intervention Experiment')
     parser.add_argument('--mode', type=str, choices=['exclude', 'preserve', 'both', 'all'],
@@ -495,6 +527,8 @@ def main():
                         help='Number of random seeds (default: 20)')
     parser.add_argument('--lr_search', action='store_true',
                         help='Run learning rate search for preserve mode')
+    parser.add_argument('--recompute_baseline', action='store_true',
+                        help='Force recompute baseline even if cached results exist')
     args = parser.parse_args()
 
     results_dir = 'results/intervention_A_concept_selection'
@@ -533,16 +567,26 @@ def main():
 
     all_results = {}
 
-    # Always run baseline for comparison
+    # Always need baseline for comparison - load cached or compute
     if 'baseline' not in modes:
-        print("\n" + "="*60)
-        print("Running BASELINE for comparison...")
-        print("="*60)
-        baseline_summary, _, _ = run_experiment(
-            'baseline', clip_model, concepts, concept_embeddings,
-            clip_concept_features, num_seeds=args.num_seeds, lr=args.lr
-        )
-        all_results['baseline'] = baseline_summary
+        cached_baseline = None if args.recompute_baseline else load_existing_baseline()
+
+        if cached_baseline is not None:
+            print("\n" + "="*60)
+            print("Loading CACHED BASELINE from previous experiment...")
+            print("="*60)
+            print(f"  Test AUC: {cached_baseline['test_auc_mean']:.4f} ± {cached_baseline['test_auc_std']:.4f}")
+            print(f"  Loaded from: results/intervention_A_concept_removal/results.json")
+            all_results['baseline'] = cached_baseline
+        else:
+            print("\n" + "="*60)
+            print("Running BASELINE for comparison...")
+            print("="*60)
+            baseline_summary, _, _ = run_experiment(
+                'baseline', clip_model, concepts, concept_embeddings,
+                clip_concept_features, num_seeds=args.num_seeds, lr=args.lr
+            )
+            all_results['baseline'] = baseline_summary
 
     # Run requested modes
     for mode in modes:
