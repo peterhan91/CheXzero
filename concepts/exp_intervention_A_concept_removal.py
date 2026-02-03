@@ -11,6 +11,7 @@ shift concept attributions from atelectasis to mediastinal concepts.
 
 import os
 import json
+import argparse
 import numpy as np
 import pandas as pd
 import torch
@@ -204,7 +205,7 @@ def extract_all_features(clip_model, concepts, concept_embeddings, clip_concept_
     return features, labels
 
 
-def train_and_evaluate(features, labels, seed=42):
+def train_and_evaluate(features, labels, seed=42, lr=2e-4):
     """Train with early stopping and evaluate on test set"""
     set_random_seed(seed)
 
@@ -230,7 +231,7 @@ def train_and_evaluate(features, labels, seed=42):
     input_dim = features['train'].shape[1]
     model = LogisticRegressionModel(input_dim).to(device)
     criterion = nn.BCELoss()
-    optimizer = optim.Adam(model.parameters(), lr=2e-4, weight_decay=1e-8)
+    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-8)
 
     # Training with early stopping
     best_val_auc = 0
@@ -288,11 +289,21 @@ def train_and_evaluate(features, labels, seed=42):
 
 
 def main():
-    results_dir = 'results/intervention_A_concept_removal'
+    parser = argparse.ArgumentParser(description='Concept Removal Intervention Experiment')
+    parser.add_argument('--lr', type=float, default=2e-4, help='Learning rate (default: 2e-4)')
+    args = parser.parse_args()
+
+    lr = args.lr
+    lr_str = f"{lr:.0e}".replace('-0', '-') if lr < 1e-3 else f"{lr}"
+
+    if lr == 2e-4:
+        results_dir = 'results/intervention_A_concept_removal'
+    else:
+        results_dir = f'results/intervention_A_concept_removal_lr{lr_str}'
     os.makedirs(results_dir, exist_ok=True)
 
     print("="*60)
-    print("EXPERIMENT A: Concept Removal Intervention (20 seeds)")
+    print(f"EXPERIMENT A: Concept Removal Intervention (20 seeds, lr={lr})")
     print("="*60)
 
     # Load CLIP model
@@ -347,8 +358,8 @@ def main():
     for i, seed in enumerate(seeds):
         print(f"\n--- Seed {seed} ({i+1}/20) ---")
 
-        baseline_result = train_and_evaluate(features_baseline, labels, seed=seed)
-        intervention_result = train_and_evaluate(features_intervention, labels, seed=seed)
+        baseline_result = train_and_evaluate(features_baseline, labels, seed=seed, lr=lr)
+        intervention_result = train_and_evaluate(features_intervention, labels, seed=seed, lr=lr)
 
         baseline_results.append(baseline_result)
         intervention_results.append(intervention_result)
@@ -364,8 +375,9 @@ def main():
 
     # Summary
     print("\n" + "="*60)
-    print("SUMMARY (20 seeds)")
+    print(f"SUMMARY (20 seeds, lr={lr})")
     print("="*60)
+    print(f"Learning rate: {lr}")
     print(f"Concepts removed: {len(atelectasis_indices)}")
     print(f"\nBaseline Test AUC:     {np.mean(baseline_test_aucs):.4f} ± {np.std(baseline_test_aucs):.4f}")
     print(f"Intervention Test AUC: {np.mean(intervention_test_aucs):.4f} ± {np.std(intervention_test_aucs):.4f}")
@@ -373,6 +385,7 @@ def main():
 
     # Save results
     results = {
+        'learning_rate': lr,
         'num_seeds': 20,
         'seeds': seeds,
         'num_concepts_removed': len(atelectasis_indices),
