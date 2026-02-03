@@ -281,11 +281,16 @@ def train_and_evaluate(features, labels, seed=42, lr=2e-4):
             inputs = inputs.to(device)
             test_preds.append(model(inputs).cpu())
             test_targets.append(targets)
-        test_preds = torch.cat(test_preds).numpy()
-        test_targets = torch.cat(test_targets).numpy()
+        test_preds = torch.cat(test_preds).numpy().flatten()
+        test_targets = torch.cat(test_targets).numpy().flatten()
     test_auc = roc_auc_score(test_targets, test_preds)
 
-    return {'val_auc': float(best_val_auc), 'test_auc': float(test_auc)}
+    return {
+        'val_auc': float(best_val_auc),
+        'test_auc': float(test_auc),
+        'y_true': test_targets,
+        'y_pred': test_preds
+    }
 
 
 def main():
@@ -383,23 +388,39 @@ def main():
     print(f"Intervention Test AUC: {np.mean(intervention_test_aucs):.4f} ± {np.std(intervention_test_aucs):.4f}")
     print(f"Improvement:           {np.mean(improvements):+.4f} ± {np.std(improvements):.4f}")
 
+    # Find best seed (by intervention test AUC)
+    best_seed_idx = np.argmax(intervention_test_aucs)
+    best_seed = seeds[best_seed_idx]
+
+    # Prepare results for JSON (without numpy arrays)
+    baseline_results_json = [
+        {'val_auc': r['val_auc'], 'test_auc': r['test_auc']}
+        for r in baseline_results
+    ]
+    intervention_results_json = [
+        {'val_auc': r['val_auc'], 'test_auc': r['test_auc']}
+        for r in intervention_results
+    ]
+
     # Save results
     results = {
         'learning_rate': lr,
         'num_seeds': 20,
         'seeds': seeds,
+        'best_seed': int(best_seed),
+        'best_seed_idx': int(best_seed_idx),
         'num_concepts_removed': len(atelectasis_indices),
         'baseline': {
             'test_auc_mean': float(np.mean(baseline_test_aucs)),
             'test_auc_std': float(np.std(baseline_test_aucs)),
             'test_aucs': baseline_test_aucs,
-            'all_results': baseline_results
+            'all_results': baseline_results_json
         },
         'intervention': {
             'test_auc_mean': float(np.mean(intervention_test_aucs)),
             'test_auc_std': float(np.std(intervention_test_aucs)),
             'test_aucs': intervention_test_aucs,
-            'all_results': intervention_results
+            'all_results': intervention_results_json
         },
         'improvement': {
             'mean': float(np.mean(improvements)),
@@ -410,7 +431,25 @@ def main():
     with open(f'{results_dir}/results.json', 'w') as f:
         json.dump(results, f, indent=2)
 
+    # Save predictions for ROC curve plotting (all 20 seeds)
+    # y_true is the same across seeds, y_pred varies
+    baseline_y_preds = np.stack([r['y_pred'] for r in baseline_results])  # (20, n_samples)
+    intervention_y_preds = np.stack([r['y_pred'] for r in intervention_results])  # (20, n_samples)
+    y_true = baseline_results[0]['y_true']  # same for all seeds
+
+    np.savez(f'{results_dir}/predictions.npz',
+        seeds=np.array(seeds),
+        y_true=y_true,
+        baseline_y_preds=baseline_y_preds,
+        baseline_aucs=np.array(baseline_test_aucs),
+        intervention_y_preds=intervention_y_preds,
+        intervention_aucs=np.array(intervention_test_aucs),
+        best_seed_idx=best_seed_idx
+    )
+
     print(f"\nResults saved to: {results_dir}")
+    print(f"  - results.json (metrics)")
+    print(f"  - predictions.npz (y_true, y_preds for all 20 seeds)")
 
 
 if __name__ == "__main__":

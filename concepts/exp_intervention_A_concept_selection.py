@@ -414,11 +414,16 @@ def train_and_evaluate(features, labels, lr=2e-4, seed=42):
             inputs = inputs.to(device)
             test_preds.append(model(inputs).cpu())
             test_targets.append(targets)
-        test_preds = torch.cat(test_preds).numpy()
-        test_targets = torch.cat(test_targets).numpy()
+        test_preds = torch.cat(test_preds).numpy().flatten()
+        test_targets = torch.cat(test_targets).numpy().flatten()
     test_auc = roc_auc_score(test_targets, test_preds)
 
-    return {'val_auc': float(best_val_auc), 'test_auc': float(test_auc)}
+    return {
+        'val_auc': float(best_val_auc),
+        'test_auc': float(test_auc),
+        'y_true': test_targets,
+        'y_pred': test_preds
+    }
 
 
 def run_experiment(mode, clip_model, concepts, concept_embeddings, clip_concept_features,
@@ -461,6 +466,12 @@ def run_experiment(mode, clip_model, concepts, concept_embeddings, clip_concept_
     test_aucs = [r['test_auc'] for r in results]
     val_aucs = [r['val_auc'] for r in results]
 
+    # Prepare JSON-safe results (without numpy arrays)
+    results_json = [
+        {'val_auc': r['val_auc'], 'test_auc': r['test_auc']}
+        for r in results
+    ]
+
     summary = {
         'mode': mode,
         'mask_stats': mask_stats,
@@ -473,14 +484,21 @@ def run_experiment(mode, clip_model, concepts, concept_embeddings, clip_concept_
         'val_auc_mean': float(np.mean(val_aucs)),
         'val_auc_std': float(np.std(val_aucs)),
         'val_aucs': val_aucs,
-        'all_results': results,
+        'all_results': results_json,
+    }
+
+    # Collect predictions for all seeds
+    predictions = {
+        'y_true': results[0]['y_true'],  # same for all seeds
+        'y_preds': np.stack([r['y_pred'] for r in results]),  # (num_seeds, n_samples)
+        'aucs': np.array(test_aucs),
     }
 
     print(f"\n{mode.upper()} Summary:")
     print(f"  Test AUC: {summary['test_auc_mean']:.4f} ± {summary['test_auc_std']:.4f}")
     print(f"  Val AUC: {summary['val_auc_mean']:.4f} ± {summary['val_auc_std']:.4f}")
 
-    return summary, features, labels
+    return summary, predictions, features, labels
 
 
 def load_existing_baseline():
@@ -566,6 +584,7 @@ def main():
         modes = [args.mode]
 
     all_results = {}
+    all_predictions = {}
 
     # Always need baseline for comparison - load cached or compute
     if 'baseline' not in modes:
@@ -578,23 +597,34 @@ def main():
             print(f"  Test AUC: {cached_baseline['test_auc_mean']:.4f} ± {cached_baseline['test_auc_std']:.4f}")
             print(f"  Loaded from: results/intervention_A_concept_removal/results.json")
             all_results['baseline'] = cached_baseline
+            # Try to load cached baseline predictions
+            baseline_pred_file = 'results/intervention_A_concept_removal/predictions.npz'
+            if os.path.exists(baseline_pred_file):
+                baseline_pred = np.load(baseline_pred_file)
+                all_predictions['baseline'] = {
+                    'y_true': baseline_pred['y_true'],
+                    'y_preds': baseline_pred['baseline_y_preds'],
+                    'aucs': baseline_pred['baseline_aucs'],
+                }
         else:
             print("\n" + "="*60)
             print("Running BASELINE for comparison...")
             print("="*60)
-            baseline_summary, _, _ = run_experiment(
+            baseline_summary, baseline_preds, _, _ = run_experiment(
                 'baseline', clip_model, concepts, concept_embeddings,
                 clip_concept_features, num_seeds=args.num_seeds, lr=args.lr
             )
             all_results['baseline'] = baseline_summary
+            all_predictions['baseline'] = baseline_preds
 
     # Run requested modes
     for mode in modes:
-        summary, _, _ = run_experiment(
+        summary, preds, _, _ = run_experiment(
             mode, clip_model, concepts, concept_embeddings,
             clip_concept_features, num_seeds=args.num_seeds, lr=args.lr
         )
         all_results[mode] = summary
+        all_predictions[mode] = preds
 
     # Learning rate search for preserve mode (if requested)
     if args.lr_search and 'preserve' in modes:
@@ -605,7 +635,7 @@ def main():
         lr_results = {}
         for lr in [1e-4, 2e-4, 5e-4, 1e-3, 2e-3]:
             print(f"\nTrying lr={lr}...")
-            summary, _, _ = run_experiment(
+            summary, _, _, _ = run_experiment(
                 'preserve', clip_model, concepts, concept_embeddings,
                 clip_concept_features, num_seeds=5, lr=lr  # Fewer seeds for search
             )
@@ -627,11 +657,12 @@ def main():
         # Re-run preserve with best LR if different from default
         if float(best_lr) != args.lr:
             print(f"\nRe-running PRESERVE with best lr={best_lr}...")
-            summary, _, _ = run_experiment(
+            summary, preds, _, _ = run_experiment(
                 'preserve', clip_model, concepts, concept_embeddings,
                 clip_concept_features, num_seeds=args.num_seeds, lr=float(best_lr)
             )
             all_results['preserve_best_lr'] = summary
+            all_predictions['preserve_best_lr'] = preds
 
     # Final comparison
     print("\n" + "="*60)
@@ -656,6 +687,27 @@ def main():
     with open(output_file, 'w') as f:
         json.dump(all_results, f, indent=2)
     print(f"\nResults saved to: {output_file}")
+
+    # Save predictions for ROC curve plotting (all seeds)
+    if all_predictions:
+        pred_data = {
+            'seeds': np.array(list(range(42, 42 + args.num_seeds))),
+        }
+        # Get y_true from any available mode (same for all)
+        for mode_name in all_predictions:
+            if 'y_true' in all_predictions[mode_name]:
+                pred_data['y_true'] = all_predictions[mode_name]['y_true']
+                break
+
+        # Add predictions for each mode
+        for mode_name, preds in all_predictions.items():
+            pred_data[f'{mode_name}_y_preds'] = preds['y_preds']
+            pred_data[f'{mode_name}_aucs'] = preds['aucs']
+
+        pred_file = f'{results_dir}/predictions_{args.mode}.npz'
+        np.savez(pred_file, **pred_data)
+        print(f"Predictions saved to: {pred_file}")
+        print(f"  Contains: {list(pred_data.keys())}")
 
 
 if __name__ == "__main__":
