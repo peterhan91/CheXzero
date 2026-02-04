@@ -58,8 +58,12 @@ def plot_roc_with_seed_variability():
     preserve_y_preds = data['preserve_y_preds']  # (20, 500)
     preserve_aucs = data['preserve_aucs']
 
-    # Load baseline from concept_based_linear_probing_torch (EC label)
-    baseline_y_true, baseline_y_preds, baseline_aucs = load_baseline_from_linear_probing()
+    # Load baseline - use predictions_preserve.npz if it has baseline, otherwise fall back
+    if 'baseline_y_preds' in data and 'baseline_aucs' in data:
+        baseline_y_preds = data['baseline_y_preds']
+        baseline_aucs = data['baseline_aucs']
+    else:
+        _, baseline_y_preds, baseline_aucs = load_baseline_from_linear_probing()
 
     print(f"Loaded data: {len(seeds)} seeds, {len(y_true)} samples")
     print(f"Baseline AUC: {np.mean(baseline_aucs):.4f} ± {np.std(baseline_aucs):.4f}")
@@ -71,7 +75,7 @@ def plot_roc_with_seed_variability():
     print(f"  Removed concepts: {results_json['preserve']['mask_stats']['removed_concepts']:,}")
 
     # Create figure with white background and 1:1 aspect ratio
-    fig, ax = plt.subplots(figsize=(8, 10))
+    fig, ax = plt.subplots(figsize=(10, 10))
     fig.patch.set_facecolor('white')
     ax.set_facecolor('white')
     ax.set_aspect('equal')
@@ -114,13 +118,13 @@ def plot_roc_with_seed_variability():
 
     # Plot baseline ROC
     ax.plot(fpr_grid, baseline_tpr_mean, color=colors[0], linewidth=3, alpha=1,
-            label=f'Baseline (AUC = {baseline_auc_mean:.3f})')
+            label=f'CLEAR (all concepts AUC = {baseline_auc_mean:.3f})')
     ax.fill_between(fpr_grid, baseline_tpr_lower, baseline_tpr_upper,
                     color=colors[0], alpha=0.2)
 
     # Plot preserve ROC
     ax.plot(fpr_grid, preserve_tpr_mean, color=colors[1], linewidth=3, alpha=1,
-            label=f'Mediastinal Only (AUC = {preserve_auc_mean:.3f})')
+            label=f'CLEAR (mediastinal only AUC = {preserve_auc_mean:.3f})')
     ax.fill_between(fpr_grid, preserve_tpr_lower, preserve_tpr_upper,
                     color=colors[1], alpha=0.2)
 
@@ -130,16 +134,16 @@ def plot_roc_with_seed_variability():
     # Customize plot
     ax.set_xlim((0.0, 1.0))
     ax.set_ylim((0.0, 1.05))
-    ax.set_xlabel('False positive rate', fontsize=34)
-    ax.set_ylabel('True positive rate', fontsize=34)
-    ax.set_title('Enlarged Cardiomediastinum', fontsize=34, pad=10)
+    ax.set_xlabel('False Positive Rate', fontsize=30)
+    ax.set_ylabel('True Positive Rate', fontsize=30)
+    ax.set_title('Enlarged Cardiomediastinum\n(concept selection intervention)', fontsize=30, pad=10)
 
     # Larger tick labels
     ax.tick_params(axis='both', which='major', labelsize=30)
 
     # Customize legend
     ax.legend(loc='lower right', frameon=True, fancybox=True, shadow=True,
-             fontsize=22, framealpha=0.9)
+             fontsize=20, framealpha=0.9)
 
     # Grid
     ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
