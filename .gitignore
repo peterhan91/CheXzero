@@ -33,3 +33,5 @@ benchmark/results/*
 CLAUDE.md
 concepts/exp_intervention_A_concept_selection.py
 .gitignore
+paper_files/paper_template.tex
+paper_files/ResponseToReviewers.tex

@@ -291,22 +291,83 @@ def plot_concept_importance(concept_weights, std_weights, all_weights, concepts,
             print(f"    Top positive concept: {df_pos_top10.iloc[0]['concept'][:50]}...")
             print(f"    10th positive concept: {df_pos_top10.iloc[-1]['concept'][:50]}...")
 
+def save_concept_importance_data(concept_weights, std_weights, all_weights, concepts, labels, output_dir):
+    """Save concept importance results as CSV (per label) and a combined summary JSON."""
+    data_dir = os.path.join(output_dir, "data")
+    os.makedirs(data_dir, exist_ok=True)
+
+    num_seeds = all_weights.shape[0]
+    summary = {
+        "embedding_model": "SFR_Embedding_Mistral",
+        "num_seeds": int(num_seeds),
+        "seeds": list(range(42, 42 + num_seeds)),
+        "num_concepts": len(concepts),
+        "labels": labels,
+        "per_label": {},
+    }
+
+    for label_idx, label in enumerate(tqdm(labels, desc="Saving data")):
+        # Build full dataframe: concept, mean, std, per-seed values
+        rows = []
+        for c_idx, concept in enumerate(concepts):
+            row = {
+                "concept": concept,
+                "importance_mean": float(concept_weights[c_idx, label_idx]),
+                "importance_std": float(std_weights[c_idx, label_idx]),
+            }
+            for s_i in range(num_seeds):
+                row[f"seed_{42 + s_i}"] = float(all_weights[s_i, c_idx, label_idx])
+            rows.append(row)
+
+        df = pd.DataFrame(rows)
+        df = df.sort_values("importance_mean", ascending=False).reset_index(drop=True)
+        df.insert(0, "rank", range(1, len(df) + 1))
+
+        # Keep only top 100 concepts
+        df_top = df.head(100)
+
+        safe_label = label.replace(" ", "_").replace("/", "_")
+        csv_path = os.path.join(data_dir, f"{safe_label}_concept_importance.csv")
+        df_top.to_csv(csv_path, index=False)
+
+        # Top 10 positive & negative for the summary
+        top10_pos = df.head(10)[["rank", "concept", "importance_mean", "importance_std"]].to_dict(orient="records")
+        top10_neg = df.tail(10).sort_values("importance_mean")[["rank", "concept", "importance_mean", "importance_std"]].to_dict(orient="records")
+        pos_count = int((df["importance_mean"] > 0).sum())
+        neg_count = int((df["importance_mean"] < 0).sum())
+
+        summary["per_label"][label] = {
+            "positive_concepts": pos_count,
+            "negative_concepts": neg_count,
+            "max_importance": float(df["importance_mean"].max()),
+            "min_importance": float(df["importance_mean"].min()),
+            "top10_positive": top10_pos,
+            "top10_negative": top10_neg,
+        }
+        print(f"  Saved {csv_path}")
+
+    summary_path = os.path.join(data_dir, "concept_importance_summary.json")
+    with open(summary_path, "w") as f:
+        json.dump(summary, f, indent=2)
+    print(f"Saved summary: {summary_path}")
+
+
 def main():
     """Main function to run linear probing concept importance visualization"""
     print("=" * 60)
     print("LINEAR PROBING CONCEPT IMPORTANCE VISUALIZATION")
     print("=" * 60)
-    
+
     # Paths
     results_dir = "concepts/results/concept_based_linear_probing_torch"
     output_dir = "concepts/results/linear_probing_concept_importance_plots"
-    
+
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
-    
+
     # Load concepts and embeddings
     concepts, concept_indices, concept_embeddings = load_concepts_and_embeddings()
-    
+
     # Load and plot linear probing concept importance (averaged across all seeds)
     print("\n" + "=" * 40)
     print("SFR-EMBEDDING-MISTRAL (AVERAGED ACROSS 20 SEEDS)")
@@ -314,10 +375,17 @@ def main():
     avg_weights, std_weights, all_weights, labels = load_linear_probing_weights_all_seeds(
         results_dir, concepts, concept_embeddings)
     plot_concept_importance(avg_weights, std_weights, all_weights, concepts, labels, output_dir)
-    
+
+    # Save structured data for all labels
+    print("\n" + "=" * 40)
+    print("SAVING CONCEPT IMPORTANCE DATA")
+    print("=" * 40)
+    save_concept_importance_data(avg_weights, std_weights, all_weights, concepts, labels, output_dir)
+
     print("\n" + "=" * 60)
     print("VISUALIZATION COMPLETE")
     print(f"All plots saved to: {output_dir}")
+    print(f"All data  saved to: {output_dir}/data/")
     print("=" * 60)
 
 if __name__ == "__main__":
