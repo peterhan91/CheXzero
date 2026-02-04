@@ -31,3 +31,5 @@ notebooks/img_hdf5.ipynb
 benchmark/external_sota/*
 benchmark/results/*
 CLAUDE.md
+concepts/exp_intervention_A_concept_selection.py
+.gitignore

@@ -422,7 +422,12 @@ def train_and_evaluate(features, labels, lr=2e-4, seed=42):
         'val_auc': float(best_val_auc),
         'test_auc': float(test_auc),
         'y_true': test_targets,
-        'y_pred': test_preds
+        'y_pred': test_preds,
+        'trained_model': best_model_state,
+        'model_config': {
+            'input_dim': input_dim,
+            'output_dim': 1,
+        }
     }
 
 
@@ -494,43 +499,87 @@ def run_experiment(mode, clip_model, concepts, concept_embeddings, clip_concept_
         'aucs': np.array(test_aucs),
     }
 
+    # Collect trained models for all seeds
+    trained_models = [
+        {
+            'seed': seeds[i],
+            'state_dict': results[i]['trained_model'],
+            'model_config': results[i]['model_config'],
+            'val_auc': results[i]['val_auc'],
+            'test_auc': results[i]['test_auc'],
+        }
+        for i in range(len(results))
+    ]
+
     print(f"\n{mode.upper()} Summary:")
     print(f"  Test AUC: {summary['test_auc_mean']:.4f} ± {summary['test_auc_std']:.4f}")
     print(f"  Val AUC: {summary['val_auc_mean']:.4f} ± {summary['val_auc_std']:.4f}")
 
-    return summary, predictions, features, labels
+    return summary, predictions, trained_models, features, labels
 
 
 def load_existing_baseline():
-    """Load baseline results from previous experiment if available"""
-    baseline_file = 'results/intervention_A_concept_removal/results.json'
-    if os.path.exists(baseline_file):
-        with open(baseline_file, 'r') as f:
-            data = json.load(f)
-        if 'baseline' in data:
-            baseline = data['baseline']
-            # Total concepts = kept + removed in intervention
-            total_concepts = 368294  # From mimic_concepts.csv
-            return {
-                'mode': 'baseline',
-                'mask_stats': {
-                    'mode': 'baseline',
-                    'total_concepts': total_concepts,
-                    'kept_concepts': total_concepts,
-                    'removed_concepts': 0,
-                },
-                'learning_rate': 2e-4,
-                'num_seeds': data.get('num_seeds', 20),
-                'seeds': data.get('seeds', list(range(42, 62))),
-                'test_auc_mean': baseline['test_auc_mean'],
-                'test_auc_std': baseline['test_auc_std'],
-                'test_aucs': baseline['test_aucs'],
-                'val_auc_mean': float(np.mean([r['val_auc'] for r in baseline['all_results']])),
-                'val_auc_std': float(np.std([r['val_auc'] for r in baseline['all_results']])),
-                'val_aucs': [r['val_auc'] for r in baseline['all_results']],
-                'all_results': baseline['all_results'],
-            }
-    return None
+    """Load baseline EC results from concept_based_linear_probing_torch"""
+    baseline_dir = 'results/concept_based_linear_probing_torch'
+    aggregated_file = f'{baseline_dir}/aggregated_results.json'
+
+    if not os.path.exists(aggregated_file):
+        return None, None
+
+    with open(aggregated_file, 'r') as f:
+        data = json.load(f)
+
+    # Extract EC-specific results
+    ec_stats = data['per_label_stats']['Enlarged Cardiomediastinum']
+    total_concepts = data['num_concepts']
+    seeds = data['seeds']
+
+    # Build baseline summary
+    baseline_summary = {
+        'mode': 'baseline',
+        'mask_stats': {
+            'mode': 'baseline',
+            'total_concepts': total_concepts,
+            'kept_concepts': total_concepts,
+            'removed_concepts': 0,
+        },
+        'learning_rate': 2e-4,
+        'num_seeds': len(seeds),
+        'seeds': seeds,
+        'test_auc_mean': ec_stats['mean'],
+        'test_auc_std': ec_stats['std'],
+        'test_aucs': ec_stats['aucs'],
+        'all_results': [
+            {'val_auc': r['per_label_aucs']['Enlarged Cardiomediastinum'],
+             'test_auc': r['per_label_aucs']['Enlarged Cardiomediastinum']}
+            for r in data['individual_results']
+        ],
+    }
+
+    # Load predictions for ROC curves
+    predictions_dir = f'{baseline_dir}/predictions'
+    ec_idx = 4  # Index of 'Enlarged Cardiomediastinum' in labels
+
+    y_true = None
+    y_preds = []
+
+    for seed in seeds:
+        pred_file = f'{predictions_dir}/seed_{seed}_predictions.pkl'
+        if os.path.exists(pred_file):
+            with open(pred_file, 'rb') as f:
+                pred_data = pickle.load(f)
+            # Extract EC column (index 4)
+            if y_true is None:
+                y_true = np.array(pred_data['test']['y_true'])[:, ec_idx]
+            y_preds.append(np.array(pred_data['test']['y_pred'])[:, ec_idx])
+
+    baseline_predictions = {
+        'y_true': y_true,
+        'y_preds': np.stack(y_preds),  # (20, 500)
+        'aucs': np.array(ec_stats['aucs']),
+    }
+
+    return baseline_summary, baseline_predictions
 
 
 def main():
@@ -585,46 +634,46 @@ def main():
 
     all_results = {}
     all_predictions = {}
+    all_trained_models = {}
+
+    # Create models directory
+    models_dir = f'{results_dir}/models'
+    os.makedirs(models_dir, exist_ok=True)
 
     # Always need baseline for comparison - load cached or compute
     if 'baseline' not in modes:
-        cached_baseline = None if args.recompute_baseline else load_existing_baseline()
+        cached_baseline, cached_baseline_preds = (None, None) if args.recompute_baseline else load_existing_baseline()
 
         if cached_baseline is not None:
             print("\n" + "="*60)
-            print("Loading CACHED BASELINE from previous experiment...")
+            print("Loading CACHED BASELINE from concept_based_linear_probing_torch...")
             print("="*60)
             print(f"  Test AUC: {cached_baseline['test_auc_mean']:.4f} ± {cached_baseline['test_auc_std']:.4f}")
-            print(f"  Loaded from: results/intervention_A_concept_removal/results.json")
+            print(f"  Loaded from: results/concept_based_linear_probing_torch/")
             all_results['baseline'] = cached_baseline
-            # Try to load cached baseline predictions
-            baseline_pred_file = 'results/intervention_A_concept_removal/predictions.npz'
-            if os.path.exists(baseline_pred_file):
-                baseline_pred = np.load(baseline_pred_file)
-                all_predictions['baseline'] = {
-                    'y_true': baseline_pred['y_true'],
-                    'y_preds': baseline_pred['baseline_y_preds'],
-                    'aucs': baseline_pred['baseline_aucs'],
-                }
+            if cached_baseline_preds is not None:
+                all_predictions['baseline'] = cached_baseline_preds
         else:
             print("\n" + "="*60)
             print("Running BASELINE for comparison...")
             print("="*60)
-            baseline_summary, baseline_preds, _, _ = run_experiment(
+            baseline_summary, baseline_preds, baseline_models, _, _ = run_experiment(
                 'baseline', clip_model, concepts, concept_embeddings,
                 clip_concept_features, num_seeds=args.num_seeds, lr=args.lr
             )
             all_results['baseline'] = baseline_summary
             all_predictions['baseline'] = baseline_preds
+            all_trained_models['baseline'] = baseline_models
 
     # Run requested modes
     for mode in modes:
-        summary, preds, _, _ = run_experiment(
+        summary, preds, trained_models, _, _ = run_experiment(
             mode, clip_model, concepts, concept_embeddings,
             clip_concept_features, num_seeds=args.num_seeds, lr=args.lr
         )
         all_results[mode] = summary
         all_predictions[mode] = preds
+        all_trained_models[mode] = trained_models
 
     # Learning rate search for preserve mode (if requested)
     if args.lr_search and 'preserve' in modes:
@@ -635,7 +684,7 @@ def main():
         lr_results = {}
         for lr in [1e-4, 2e-4, 5e-4, 1e-3, 2e-3]:
             print(f"\nTrying lr={lr}...")
-            summary, _, _, _ = run_experiment(
+            summary, _, _, _, _ = run_experiment(
                 'preserve', clip_model, concepts, concept_embeddings,
                 clip_concept_features, num_seeds=5, lr=lr  # Fewer seeds for search
             )
@@ -657,12 +706,13 @@ def main():
         # Re-run preserve with best LR if different from default
         if float(best_lr) != args.lr:
             print(f"\nRe-running PRESERVE with best lr={best_lr}...")
-            summary, preds, _, _ = run_experiment(
+            summary, preds, trained_models, _, _ = run_experiment(
                 'preserve', clip_model, concepts, concept_embeddings,
                 clip_concept_features, num_seeds=args.num_seeds, lr=float(best_lr)
             )
             all_results['preserve_best_lr'] = summary
             all_predictions['preserve_best_lr'] = preds
+            all_trained_models['preserve_best_lr'] = trained_models
 
     # Final comparison
     print("\n" + "="*60)
@@ -708,6 +758,26 @@ def main():
         np.savez(pred_file, **pred_data)
         print(f"Predictions saved to: {pred_file}")
         print(f"  Contains: {list(pred_data.keys())}")
+
+    # Save trained model checkpoints
+    if all_trained_models:
+        print(f"\nSaving model checkpoints to: {models_dir}/")
+        for mode_name, trained_models in all_trained_models.items():
+            for model_info in trained_models:
+                seed = model_info['seed']
+                model_data = {
+                    'seed': seed,
+                    'mode': mode_name,
+                    'method': f'intervention_A_concept_selection_{mode_name}',
+                    'state_dict': model_info['state_dict'],
+                    'model_config': model_info['model_config'],
+                    'val_auc': model_info['val_auc'],
+                    'test_auc': model_info['test_auc'],
+                    'mask_stats': all_results[mode_name]['mask_stats'],
+                }
+                model_file = f'{models_dir}/{mode_name}_seed_{seed}_model.pth'
+                torch.save(model_data, model_file)
+        print(f"  Saved {sum(len(m) for m in all_trained_models.values())} model checkpoints")
 
 
 if __name__ == "__main__":
